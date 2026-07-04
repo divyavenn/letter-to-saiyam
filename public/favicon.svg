@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 580" role="img" aria-label="By Air Mail / Par Avion airmail stamp with Wien Schwechat postmark">
+  <g fill="none" stroke="#111" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- BY AIR MAIL banner -->
+    <g transform="rotate(-7 305 120)">
+      <path d="M96 54 L534 40 L540 196 L102 206 Z" />
+      <text x="318" y="118" text-anchor="middle" fill="#111" stroke="none"
+            font-family="'Arial Narrow', 'Helvetica Neue', Arial, sans-serif"
+            font-weight="800" font-size="74" letter-spacing="2">BY AIR MAIL</text>
+      <text x="318" y="178" text-anchor="middle" fill="#111" stroke="none"
+            font-family="'Arial Narrow', 'Helvetica Neue', Arial, sans-serif"
+            font-weight="600" font-size="50" letter-spacing="4">PAR AVION</text>
+    </g>
+
+    <!-- Postmark card -->
+    <g transform="rotate(4 290 410)">
+      <rect x="34" y="236" width="512" height="320" rx="34" />
+
+      <!-- 'A' roundel with diamond-dot ring -->
+      <g>
+        <circle cx="104" cy="312" r="26" />
+        <text x="104" y="324" text-anchor="middle" fill="#111" stroke="none"
+              font-family="Arial, sans-serif" font-weight="700" font-size="34">A</text>
+        <g stroke-width="4">
+          <path d="M104 268 l8 8 -8 8 -8 -8 Z" />
+          <path d="M148 312 l8 8 -8 8 -8 -8 Z" />
+          <path d="M104 356 l8 8 -8 8 -8 -8 Z" />
+          <path d="M60 312 l8 8 -8 8 -8 -8 Z" />
+          <path d="M135 281 l7 7 -7 7 -7 -7 Z" />
+          <path d="M135 343 l7 7 -7 7 -7 -7 Z" />
+          <path d="M73 343 l7 7 -7 7 -7 -7 Z" />
+          <path d="M73 281 l7 7 -7 7 -7 -7 Z" />
+        </g>
+      </g>
+
+      <!-- airplane box (top right) -->
+      <g transform="rotate(-4 408 286)">
+        <rect x="330" y="252" width="156" height="68" rx="8" />
+        <g stroke-width="5">
+          <path d="M348 300 L470 282" />
+          <path d="M362 296 L452 270 L438 296 Z" fill="#111" stroke="none" />
+          <path d="M398 290 L372 268" />
+          <path d="M392 292 L406 312" />
+        </g>
+      </g>
+
+      <!-- date digits -->
+      <text x="290" y="424" text-anchor="middle" fill="#111" stroke="none"
+            font-family="'Courier New', monospace" font-weight="700"
+            font-size="58" letter-spacing="6">09 07 00  47</text>
+
+      <!-- hand-stamped origin -->
+      <g transform="rotate(-3 388 492)">
+        <text x="388" y="486" text-anchor="middle" fill="#111" stroke="none"
+              font-family="'Comic Sans MS', 'Segoe Print', cursive" font-weight="700"
+              font-size="32" letter-spacing="1">WIEN SCHWECHAT</text>
+        <text x="388" y="522" text-anchor="middle" fill="#111" stroke="none"
+              font-family="'Comic Sans MS', 'Segoe Print', cursive" font-weight="700"
+              font-size="30" letter-spacing="2">F 004</text>
+      </g>
+
+      <!-- return arrow box (bottom left) -->
+      <g>
+        <rect x="70" y="476" width="86" height="64" rx="8" />
+        <g stroke-width="6">
+          <path d="M138 508 L92 508" />
+          <path d="M108 492 L90 508 L108 524" />
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 560" role="img" aria-label="Polynesie Francaise passport entry stamp with Mississauga postmark">
+  <defs>
+    <path id="policeArc" d="M92 104 A 250 250 0 0 1 348 82" />
+    <path id="ringTop" d="M92 392 A 108 108 0 0 1 308 392" />
+    <path id="ringBottom" d="M120 452 A 70 70 0 0 0 260 452" />
+  </defs>
+
+  <g fill="none" stroke="#111" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- Hexagonal POLICE NATIONALE entry stamp -->
+    <g transform="rotate(-5 215 145)" stroke-width="5">
+      <path d="M70 132 L112 58 L322 48 L370 104 L360 214 L132 230 L60 168 Z" />
+      <path d="M82 134 L120 70 L316 61 L356 110 L347 204 L138 218 L74 164 Z" stroke-width="3" />
+
+      <text fill="#111" stroke="none" font-family="Arial, sans-serif"
+            font-weight="700" font-size="17" letter-spacing="1.5">
+        <textPath href="#policeArc" startOffset="3%">POLICE NATIONALE</textPath>
+      </text>
+
+      <text x="218" y="112" text-anchor="middle" fill="#111" stroke="none"
+            font-family="'Comic Sans MS', cursive" font-weight="700"
+            font-size="20" letter-spacing="4">TAI FA</text>
+
+      <text x="214" y="156" text-anchor="middle" fill="#111" stroke="none"
+            font-family="'Arial Narrow', Arial, sans-serif" font-weight="800"
+            font-size="44" letter-spacing="1">30 DEC 2002</text>
+
+      <text x="210" y="200" text-anchor="middle" fill="#111" stroke="none"
+            font-family="Arial, sans-serif" font-weight="700"
+            font-size="21" letter-spacing="2">POLYNESIE FRANCAISE</text>
+    </g>
+
+    <!-- star -->
+    <path d="M498 128 l13 34 36 2 -28 23 10 35 -31 -20 -31 20 10 -35 -28 -23 36 -2 Z"
+          fill="#111" stroke="#111" stroke-width="3" />
+
+    <!-- Mississauga circular postmark -->
+    <g>
+      <circle cx="200" cy="388" r="138" stroke-width="6" />
+      <circle cx="200" cy="388" r="120" stroke-width="3" />
+
+      <text fill="#111" stroke="none" font-family="Arial, sans-serif"
+            font-weight="700" font-size="40" letter-spacing="6">
+        <textPath href="#ringTop" startOffset="50%" text-anchor="middle">MISSISSAUGA</textPath>
+      </text>
+      <text fill="#111" stroke="none" font-family="Arial, sans-serif"
+            font-weight="700" font-size="40" letter-spacing="10">
+        <textPath href="#ringBottom" startOffset="50%" text-anchor="middle">ON</textPath>
+      </text>
+
+      <text x="198" y="404" text-anchor="middle" fill="#111" stroke="none"
+            font-family="'Comic Sans MS', cursive" font-weight="700"
+            font-size="40" letter-spacing="4" transform="rotate(-4 198 392)">03 4 01</text>
+    </g>
+
+    <!-- waving cancellation banner -->
+    <g transform="rotate(3 430 430)" stroke-width="5">
+      <path d="M300 360 q26 -16 52 0 q26 16 52 0 q26 -16 52 0 q26 16 52 0 q26 -16 36 -6" />
+      <path d="M300 388 q26 -16 52 0 q26 16 52 0 q26 -16 52 0 q26 16 52 0 q26 -16 36 -6" />
+      <path d="M300 416 q26 -16 52 0 q26 16 52 0 q26 -16 52 0 q26 16 52 0 q26 -16 36 -6" />
+      <path d="M300 444 q26 -16 52 0 q26 16 52 0 q26 -16 52 0 q26 16 52 0 q26 -16 36 -6" />
+      <path d="M300 472 q26 -16 52 0 q26 16 52 0 q26 -16 52 0 q26 16 52 0 q26 -16 36 -6" />
+      <path d="M300 360 L300 472" />
+      <path d="M560 354 L560 466" />
+    </g>
+  </g>
+</svg>
