@@ -1239,9 +1239,11 @@ const PostcardFace = styled.div`
 
       @media (max-width: 680px) {
         /* Size each face once; the flip only animates their shared rotation. */
+        --mobile-letter-inset-y: clamp(28px, 7vw, 40px);
+        --mobile-letter-inset-x: clamp(32px, 9vw, 48px);
         bottom: auto;
         height: var(--postcard-open-height);
-        padding: clamp(28px, 7vw, 40px) clamp(32px, 9vw, 48px);
+        padding: var(--mobile-letter-inset-y) var(--mobile-letter-inset-x);
       }
     `}
 
@@ -1502,8 +1504,11 @@ const LetterBody = styled.div`
 const MobileLetterBody = styled(LetterBody)`
   position: relative;
   z-index: 2;
-  margin: 0;
-  padding: 2px 2px 14px 0;
+  /* Include the upper/right paper margin in the scroller so postage isn't clipped. */
+  margin: calc(8px - var(--mobile-letter-inset-y))
+    calc(8px - var(--mobile-letter-inset-x)) 0 0;
+  padding: calc(var(--mobile-letter-inset-y) - 6px)
+    calc(var(--mobile-letter-inset-x) - 6px) 14px 0;
   overflow-wrap: anywhere;
 
   /* Keep Markdown in this flow so paragraphs widen as they pass the address. */
@@ -1517,28 +1522,35 @@ const MobileLetterBody = styled(LetterBody)`
 const MobileAddress = styled.div`
   float: right;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 10px;
   width: 58%;
   max-width: 228px;
-  margin: 0 0 18px 16px;
+  margin: 0 0 8px 6px;
   text-align: left;
   cursor: pointer;
 
   ${AddressBlock} {
+    grid-area: 2 / 1;
     min-width: 0;
     margin: 0;
     overflow-wrap: anywhere;
   }
 
   ${StampLayer} {
-    margin: 0;
+    grid-area: 1 / 1;
+    grid-template-columns: minmax(0, 1fr);
+    justify-self: end;
+    justify-content: normal;
+    width: min(clamp(44px, 12vw, 72px), calc(var(--mobile-letter-inset-x) + 2px));
+    margin: calc(6px - var(--mobile-letter-inset-y)) 0 -10px;
     padding-left: var(--stamp-stack-inset, 0px);
+    /* Tuck the stamp over the address's upper-right corner by 10px. */
+    transform: translateX(calc(100% - 10px));
   }
 
   ${Stamp} {
-    width: clamp(44px, 12vw, 72px);
+    width: 100%;
   }
 `;
 
