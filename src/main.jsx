@@ -51,7 +51,7 @@ const STAMP_LIBRARY = Object.entries(stampFiles)
   }))
   .sort((a, b) => a.name.localeCompare(b.name));
 
-function getPostcardMetrics(viewportWidth, viewportHeight) {
+function getPostcardMetrics(viewportWidth) {
   const isMobile = viewportWidth <= POSTCARD_MOBILE_BREAKPOINT;
   const sidePadding = isMobile
     ? 16
@@ -61,11 +61,7 @@ function getPostcardMetrics(viewportWidth, viewportHeight) {
   const stackStep = isMobile
     ? (cardHeight * POSTCARD_ITEM_SIZE) / POSTCARD_HEIGHT
     : POSTCARD_ITEM_SIZE;
-  const openCardHeight = isMobile
-    ? Math.max(cardHeight, Math.min(viewportHeight - 148, 680))
-    : cardHeight;
-
-  return { isMobile, cardHeight, stackStep, openCardHeight };
+  return { isMobile, cardHeight, stackStep };
 }
 
 function parseFrontmatter(source) {
@@ -618,15 +614,13 @@ function App() {
   const [openId, setOpenId] = useState(null);
   const sfx = useSfxDurations();
   const [postcardMetrics, setPostcardMetrics] = useState(() =>
-    getPostcardMetrics(
-      window.innerWidth,
-      window.visualViewport?.height ?? window.innerHeight,
-    ),
+    getPostcardMetrics(window.innerWidth),
   );
 
   const total = postcards.length;
   const stageHeight =
     postcardMetrics.cardHeight + postcardMetrics.stackStep * (total - 1) + 48;
+  const openIndex = postcards.findIndex((postcard) => postcard.id === openId);
 
   useEffect(() => {
     let resizeFrame = 0;
@@ -636,22 +630,16 @@ function App() {
       }
       resizeFrame = requestAnimationFrame(() => {
         resizeFrame = 0;
-        setPostcardMetrics(
-          getPostcardMetrics(
-            window.innerWidth,
-            window.visualViewport?.height ?? window.innerHeight,
-          ),
+        const next = getPostcardMetrics(window.innerWidth);
+        setPostcardMetrics((current) =>
+          current.cardHeight === next.cardHeight ? current : next,
         );
       });
     };
     window.addEventListener("resize", updateMetrics, { passive: true });
-    window.visualViewport?.addEventListener("resize", updateMetrics, {
-      passive: true,
-    });
     return () => {
       cancelAnimationFrame(resizeFrame);
       window.removeEventListener("resize", updateMetrics);
-      window.visualViewport?.removeEventListener("resize", updateMetrics);
     };
   }, []);
 
@@ -684,7 +672,12 @@ function App() {
           <Vignette aria-hidden="true" />
           <StackRail
             aria-label="Postcard letters"
-            style={{ "--postcard-stage-height": `${stageHeight}px` }}
+            $open={openIndex !== -1}
+            style={{
+              "--postcard-stage-height": `${stageHeight}px`,
+              "--postcard-height": `${postcardMetrics.cardHeight}px`,
+              "--open-postcard-offset": `${openIndex * postcardMetrics.stackStep + 32}px`,
+            }}
           >
             {postcards.map((postcard, index) => (
               <Postcard
@@ -730,7 +723,7 @@ function Postcard({
     ? 0
     : postcard.jitterRotate * (postcardMetrics.isMobile ? 0.35 : 1);
   const scale = isRaised
-    ? isOpen && postcardMetrics.isMobile
+    ? postcardMetrics.isMobile
       ? 1
       : 1.035
     : POSTCARD_SCALE_OFFSETS[depth];
@@ -752,7 +745,12 @@ function Postcard({
   const prefersReducedMotion = useReducedMotion();
 
   const handlePointerMove = (event) => {
-    if (!isRaised || prefersReducedMotion || event.pointerType === "touch") {
+    if (
+      !isRaised ||
+      postcardMetrics.isMobile ||
+      prefersReducedMotion ||
+      event.pointerType === "touch"
+    ) {
       return;
     }
     const rect = event.currentTarget.getBoundingClientRect();
@@ -768,13 +766,12 @@ function Postcard({
   };
 
   const ease = [0.22, 1, 0.36, 1];
-  const moveTransition = { duration: moveDuration, ease };
-  const mobileStampWidth = 68;
-  const mobileStampOverlap = 8;
-  const mobileStampCount = postcard.stamps.length;
-  const mobileStampGroupWidth = mobileStampCount
-    ? mobileStampWidth + (mobileStampCount - 1) * mobileStampOverlap
-    : 0;
+  const moveTransition = {
+    duration: prefersReducedMotion
+      ? 0
+      : postcardMetrics.isMobile ? 0.18 : moveDuration,
+    ease,
+  };
 
   return (
     <PostcardShell
@@ -795,12 +792,7 @@ function Postcard({
         y,
         rotate,
         scale,
-        filter,
-        height: postcardMetrics.isMobile
-          ? isOpen
-            ? postcardMetrics.openCardHeight
-            : postcardMetrics.cardHeight
-          : undefined,
+        filter: postcardMetrics.isMobile ? "none" : filter,
       }}
       transition={{
         filter: moveTransition,
@@ -808,14 +800,13 @@ function Postcard({
         rotate: moveTransition,
         y: moveTransition,
         scale: moveTransition,
-        height: moveTransition,
       }}
     >
       <FlipCard
-        as={motion.article}
         $open={isOpen}
-        animate={{ rotateY: isOpen ? 180 : 0 }}
-        transition={{ duration: flipDuration, ease: [0.4, 0, 0.2, 1] }}
+        style={{
+          "--flip-duration": `${postcardMetrics.isMobile ? 0.28 : flipDuration}s`,
+        }}
         aria-label={`Postcard to ${postcard.recipient || "you"}, ${isOpen ? "letter back" : "postcard front"}`}
       >
         <PostcardFace $front>
@@ -826,6 +817,15 @@ function Postcard({
         </PostcardFace>
 
         <PostcardFace $back>
+          {postcard.stamps.length > 0 && (
+            <StampLayer>
+              {postcard.stamps.map((stamp, stampIndex) => (
+                <Stamp key={`${stamp.name}-${stampIndex}`} $index={stampIndex}>
+                  <StampImage src={stamp.src} alt={stamp.name} />
+                </Stamp>
+              ))}
+            </StampLayer>
+          )}
           <LocationImprint>{postcard.location}</LocationImprint>
           <PostcardBack>
             <BackColumns>
@@ -842,30 +842,7 @@ function Postcard({
                   </ReactMarkdown>
                 </LetterBody>
               </Correspondence>
-              <AddressColumn
-                style={{
-                  "--mobile-address-right": `${
-                    mobileStampCount ? mobileStampGroupWidth - 2 : 8
-                  }px`,
-                }}
-              >
-                {mobileStampCount > 0 && (
-                  <StampLayer $mobile={postcardMetrics.isMobile}>
-                    {postcard.stamps.map((stamp, stampIndex) => (
-                      <Stamp
-                        key={`${stamp.name}-${stampIndex}`}
-                        $index={stampIndex}
-                        $mobile={postcardMetrics.isMobile}
-                      >
-                        <StampImage
-                          src={stamp.src}
-                          alt={stamp.name}
-                          $mobile={postcardMetrics.isMobile}
-                        />
-                      </Stamp>
-                    ))}
-                  </StampLayer>
-                )}
+              <AddressColumn>
                 <DividerImprint>{POSTCARD_IMPRINT}</DividerImprint>
                 <AddressBlock>
                   {postcard.recipient && (
@@ -1125,6 +1102,11 @@ const StackRail = styled.section`
 
   @media (max-width: 680px) {
     width: 100%;
+    /* Small viewport units keep the paper still as browser chrome retracts. */
+    --postcard-open-height: max(var(--postcard-height), min(calc(100svh - 148px), 680px));
+    height: ${(props) => props.$open
+      ? "max(var(--postcard-stage-height), calc(var(--open-postcard-offset) + var(--postcard-open-height)))"
+      : "var(--postcard-stage-height)"};
   }
 `;
 
@@ -1140,17 +1122,18 @@ const PostcardShell = styled(motion.div)`
 
   @media (max-width: 680px) {
     width: 100%;
-    aspect-ratio: auto;
     transform-origin: 50% 0%;
   }
 `;
 
-const FlipCard = styled.div`
+const FlipCard = styled.article`
   position: relative;
   width: 100%;
   height: 100%;
   cursor: ${(props) => (props.$open ? "default" : "pointer")};
   transform-style: preserve-3d;
+  transform: rotateY(${(props) => props.$open ? 180 : 0}deg);
+  transition: transform var(--flip-duration) cubic-bezier(0.4, 0, 0.2, 1);
 `;
 
 const PostcardFace = styled.div`
@@ -1159,6 +1142,7 @@ const PostcardFace = styled.div`
   overflow: hidden;
   padding: clamp(15px, 3.4vw, 30px);
   border-radius: 5px;
+  -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
   background:
     url("/textures/tactile-noise-light.png"),
@@ -1207,7 +1191,21 @@ const PostcardFace = styled.div`
         #faf7f0;
       background-size: auto, 500px 500px, auto;
       background-blend-mode: multiply, soft-light, normal;
+
+      @media (max-width: 680px) {
+        /* Size each face once; the flip only animates their shared rotation. */
+        bottom: auto;
+        height: var(--postcard-open-height);
+      }
     `}
+
+  @media (max-width: 680px) {
+    box-shadow:
+      0 8px 18px rgba(20, 12, 8, 0.24),
+      0 2px 4px rgba(20, 12, 8, 0.16),
+      inset 0 1.5px 0 rgba(255, 255, 255, 0.85),
+      inset 0 -1.5px 0 rgba(60, 38, 22, 0.2);
+  }
 `;
 
 const PostcardImage = styled.img`
@@ -1228,17 +1226,9 @@ const StampLayer = styled.div`
   justify-content: flex-end;
   pointer-events: none;
 
-  ${(props) =>
-    props.$mobile &&
-    `
-      top: 4px;
-      right: 8px;
-      display: grid;
-      width: 68px;
-      height: 58px;
-      justify-items: end;
-      align-items: center;
-    `}
+  @media (max-width: 680px) {
+    display: grid;
+  }
 `;
 
 const Stamp = styled.div`
@@ -1248,17 +1238,14 @@ const Stamp = styled.div`
   opacity: 0.85;
   mix-blend-mode: multiply;
   transform: ${(props) =>
-    props.$mobile
-      ? `translateX(${props.$index * -8}px) rotate(${props.$index % 2 ? -3 : 2}deg)`
-      : `translateX(${props.$index * -20}px) rotate(${props.$index % 2 ? -3 : 2}deg)`};
+    `translateX(${props.$index * -20}px) rotate(${props.$index % 2 ? -3 : 2}deg)`};
 
-  ${(props) =>
-    props.$mobile &&
-    `
-      grid-area: 1 / 1;
-      width: 68px;
-      height: 58px;
-    `}
+  @media (max-width: 680px) {
+    grid-area: 1 / 1;
+    width: clamp(64px, 18vw, 96px);
+    transform: ${(props) =>
+      `translateX(${props.$index * -8}px) rotate(${props.$index % 2 ? -3 : 2}deg)`};
+  }
 `;
 
 const StampImage = styled.img`
@@ -1266,8 +1253,6 @@ const StampImage = styled.img`
   width: 100%;
   object-fit: contain;
   filter: sepia(0.18) saturate(0.82) contrast(0.9);
-
-  ${(props) => props.$mobile && "height: 100%;"}
 `;
 
 const PostcardBack = styled.div`
@@ -1283,10 +1268,6 @@ const BackColumns = styled.div`
   display: flex;
   flex: 1;
   min-height: 0;
-
-  @media (max-width: 680px) {
-    flex-direction: column;
-  }
 `;
 
 const Correspondence = styled.div`
@@ -1297,13 +1278,6 @@ const Correspondence = styled.div`
   flex-direction: column;
   padding-left: clamp(18px, 3vw, 34px);
   padding-right: clamp(10px, 1.8vw, 20px);
-
-  @media (max-width: 680px) {
-    flex: 1 1 auto;
-    order: 1;
-    width: 100%;
-    padding: 6px 10px 12px;
-  }
 `;
 
 const AddressColumn = styled.div`
@@ -1314,13 +1288,6 @@ const AddressColumn = styled.div`
   flex-direction: column;
   padding-left: clamp(16px, 2.6vw, 28px);
   padding-bottom: clamp(20px, 3.6vw, 30px);
-
-  @media (max-width: 680px) {
-    flex: 0 0 88px;
-    order: -1;
-    width: 100%;
-    padding: 0;
-  }
 `;
 
 const DividerImprint = styled.div`
@@ -1336,10 +1303,6 @@ const DividerImprint = styled.div`
   font-size: clamp(0.4rem, 0.78vw, 0.52rem);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-
-  @media (max-width: 680px) {
-    display: none;
-  }
 `;
 
 const LocationImprint = styled.div`
@@ -1368,15 +1331,6 @@ const Postdate = styled.div`
   font-family: "DIY", "Courier New", monospace;
   font-size: clamp(0.5rem, 1vw, 0.64rem);
   letter-spacing: 0.02em;
-
-  @media (max-width: 680px) {
-    left: auto;
-    right: 8px;
-    bottom: 3px;
-    width: 68px;
-    text-align: center;
-    font-size: 0.56rem;
-  }
 `;
 
 const AddressBlock = styled.div`
@@ -1385,16 +1339,7 @@ const AddressBlock = styled.div`
   font-family: "Biro Script", "Segoe Print", cursive;
   opacity: 0.85;
   mix-blend-mode: multiply;
-
-  @media (max-width: 680px) {
-    position: absolute;
-    top: 50%;
-    left: 8px;
-    right: var(--mobile-address-right, 8px);
-    margin: 0;
-    transform: translateY(-50%);
-    overflow-wrap: anywhere;
-  }
+  overflow-wrap: break-word;
 `;
 
 const Recipient = styled.div`
@@ -1437,8 +1382,7 @@ const LetterBody = styled.div`
   }
 
   @media (max-width: 680px) {
-    padding: 4px 4px 14px;
-    font-size: clamp(0.8rem, 3.8vw, 1rem);
+    font-size: clamp(0.82rem, 3.4vw, 1rem);
     line-height: 1.5;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
