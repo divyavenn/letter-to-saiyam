@@ -4,3 +4,5 @@ Any images should be added to the images folder. An image that appears before th
 Any image appearing AFTER the letter itself starts should be inserted into the letter in the same place it is in the reference document.
 If there is no image before the saluation, reuse one of the images in the letter itself as the cover.
 If there is only one image it should be the cover. If there are multiple, the topmost one should be used as the cover.
+
+After adding a letter, commit the letter and its associated images, then push the commit to the current branch’s remote.
