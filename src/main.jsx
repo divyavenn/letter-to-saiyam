@@ -1520,33 +1520,40 @@ const MobileLetterBody = styled(LetterBody)`
 `;
 
 const MobileAddress = styled.div`
+  --mobile-stamp-width: clamp(64px, 18vw, 96px);
+  --mobile-stamp-outset: calc(var(--mobile-letter-inset-x) - 6px);
+  --mobile-postage-overlap: 4px;
   float: right;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr)
+    calc(var(--mobile-stamp-width) - var(--mobile-postage-overlap));
   align-items: start;
-  width: 58%;
-  max-width: 228px;
-  margin: 0 0 8px 6px;
+  /* Use the paper margin for postage without widening the text's exclusion. */
+  width: calc(58% + var(--mobile-stamp-outset));
+  max-width: calc(228px + var(--mobile-stamp-outset));
+  margin: 0 calc(0px - var(--mobile-stamp-outset)) 8px 6px;
   text-align: left;
   cursor: pointer;
 
   ${AddressBlock} {
     grid-area: 2 / 1;
+    justify-self: end;
+    width: fit-content;
+    max-width: 100%;
     min-width: 0;
     margin: 0;
     overflow-wrap: anywhere;
   }
 
   ${StampLayer} {
-    grid-area: 1 / 1;
+    grid-area: 1 / 2;
     grid-template-columns: minmax(0, 1fr);
     justify-self: end;
     justify-content: normal;
-    width: min(clamp(44px, 12vw, 72px), calc(var(--mobile-letter-inset-x) + 2px));
-    margin: calc(6px - var(--mobile-letter-inset-y)) 0 -10px;
+    width: var(--mobile-stamp-width);
+    margin: calc(6px - var(--mobile-letter-inset-y)) 0
+      calc(0px - var(--mobile-postage-overlap));
     padding-left: var(--stamp-stack-inset, 0px);
-    /* Tuck the stamp over the address's upper-right corner by 10px. */
-    transform: translateX(calc(100% - 10px));
   }
 
   ${Stamp} {
