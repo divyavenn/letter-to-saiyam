@@ -8,11 +8,12 @@ import React, {
 import { createRoot } from "react-dom/client";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import styled, { createGlobalStyle, keyframes } from "styled-components";
+import styled, { createGlobalStyle } from "styled-components";
 import {
-  AnimatePresence,
+  MotionConfig,
   motion,
   useMotionValue,
+  useReducedMotion,
   useSpring,
 } from "motion/react";
 
@@ -27,11 +28,10 @@ const stampFiles = import.meta.glob("./stamps/*.svg", {
   import: "default",
 });
 
-const POSTCARD_HEIGHT = 383;
-const POSTCARD_HEIGHT_MOBILE = 210;
-// Vertical gap between stacked cards. Must exceed half the card height so that a
-// card sandwiched between two raised neighbours still peeks through (2 * gap > card height).
+const POSTCARD_HEIGHT = (680 * 9) / 16;
+// Keep the mobile stack at the same overlap ratio as the desktop stack.
 const POSTCARD_ITEM_SIZE = 220;
+const POSTCARD_MOBILE_BREAKPOINT = 680;
 const POSTCARD_SCALE_OFFSETS = [1, 0.995, 0.99, 0.985, 0.98];
 // Buried cards are nudged sideways and tilted by a per-card random amount
 // (deterministic, derived from the slug) so they fan out and stay legible.
@@ -50,6 +50,23 @@ const STAMP_LIBRARY = Object.entries(stampFiles)
     src,
   }))
   .sort((a, b) => a.name.localeCompare(b.name));
+
+function getPostcardMetrics(viewportWidth, viewportHeight) {
+  const isMobile = viewportWidth <= POSTCARD_MOBILE_BREAKPOINT;
+  const sidePadding = isMobile
+    ? 16
+    : Math.max(16, Math.min(56, viewportWidth * 0.04));
+  const cardWidth = Math.min(viewportWidth - sidePadding * 2, 680);
+  const cardHeight = (cardWidth * 9) / 16;
+  const stackStep = isMobile
+    ? (cardHeight * POSTCARD_ITEM_SIZE) / POSTCARD_HEIGHT
+    : POSTCARD_ITEM_SIZE;
+  const openCardHeight = isMobile
+    ? Math.max(cardHeight, Math.min(viewportHeight - 148, 680))
+    : cardHeight;
+
+  return { isMobile, cardHeight, stackStep, openCardHeight };
+}
 
 function parseFrontmatter(source) {
   const match = source.match(/^---\n([\s\S]*?)\n---\n?/);
@@ -600,24 +617,42 @@ function App() {
   const [raisedId, setRaisedId] = useState(() => postcards[0]?.id ?? null);
   const [openId, setOpenId] = useState(null);
   const sfx = useSfxDurations();
+  const [postcardMetrics, setPostcardMetrics] = useState(() =>
+    getPostcardMetrics(
+      window.innerWidth,
+      window.visualViewport?.height ?? window.innerHeight,
+    ),
+  );
 
   const total = postcards.length;
-  const stageHeight = POSTCARD_HEIGHT + POSTCARD_ITEM_SIZE * (total - 1) + 48;
-  const mobileStageHeight =
-    POSTCARD_HEIGHT_MOBILE + POSTCARD_ITEM_SIZE * (total - 1) + 48;
+  const stageHeight =
+    postcardMetrics.cardHeight + postcardMetrics.stackStep * (total - 1) + 48;
 
-  // freeze the idle animations when the tab isn't visible
   useEffect(() => {
-    const sync = () => {
-      if (document.hidden) {
-        document.documentElement.setAttribute("data-hidden", "");
-      } else {
-        document.documentElement.removeAttribute("data-hidden");
+    let resizeFrame = 0;
+    const updateMetrics = () => {
+      if (resizeFrame) {
+        return;
       }
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = 0;
+        setPostcardMetrics(
+          getPostcardMetrics(
+            window.innerWidth,
+            window.visualViewport?.height ?? window.innerHeight,
+          ),
+        );
+      });
     };
-    document.addEventListener("visibilitychange", sync);
-    sync();
-    return () => document.removeEventListener("visibilitychange", sync);
+    window.addEventListener("resize", updateMetrics, { passive: true });
+    window.visualViewport?.addEventListener("resize", updateMetrics, {
+      passive: true,
+    });
+    return () => {
+      cancelAnimationFrame(resizeFrame);
+      window.removeEventListener("resize", updateMetrics);
+      window.visualViewport?.removeEventListener("resize", updateMetrics);
+    };
   }, []);
 
   const handleActivate = (id) => {
@@ -641,24 +676,23 @@ function App() {
   };
 
   return (
-    <>
-      <GlobalStyle />
-      <BackgroundMusic videoId={BG_MUSIC_VIDEO_ID} />
-      <Desktop onClick={handleBackgroundClick}>
-        <Vignette aria-hidden="true" />
-        <StackRail
-          aria-label="Postcard letters"
-          style={{
-            "--postcard-stage-height": `${stageHeight}px`,
-            "--postcard-stage-height-mobile": `${mobileStageHeight}px`,
-          }}
-        >
-          <AnimatePresence initial={false}>
+    <MotionConfig reducedMotion="user">
+      <>
+        <GlobalStyle />
+        <BackgroundMusic videoId={BG_MUSIC_VIDEO_ID} />
+        <Desktop onClick={handleBackgroundClick}>
+          <Vignette aria-hidden="true" />
+          <StackRail
+            aria-label="Postcard letters"
+            style={{ "--postcard-stage-height": `${stageHeight}px` }}
+          >
             {postcards.map((postcard, index) => (
               <Postcard
                 key={postcard.id}
                 postcard={postcard}
                 stackPos={index}
+                stackStep={postcardMetrics.stackStep}
+                postcardMetrics={postcardMetrics}
                 total={total}
                 isRaised={raisedId === postcard.id}
                 isOpen={openId === postcard.id}
@@ -667,16 +701,18 @@ function App() {
                 onActivate={() => handleActivate(postcard.id)}
               />
             ))}
-          </AnimatePresence>
-        </StackRail>
-      </Desktop>
-    </>
+          </StackRail>
+        </Desktop>
+      </>
+    </MotionConfig>
   );
 }
 
 function Postcard({
   postcard,
   stackPos,
+  stackStep,
+  postcardMetrics,
   total,
   isRaised,
   isOpen,
@@ -685,13 +721,19 @@ function Postcard({
   onActivate,
 }) {
   const depth = Math.min(stackPos, POSTCARD_SCALE_OFFSETS.length - 1);
-  const baseY = stackPos * POSTCARD_ITEM_SIZE;
+  const baseY = stackPos * stackStep;
   // Spatial slot (y) is fixed by date. Buried cards fan out with a random sideways
   // nudge + tilt; the lifted card straightens, centers, scales up and shadows deeper.
-  const x = isRaised ? 0 : postcard.jitterX;
+  const x = isRaised ? 0 : postcard.jitterX * (postcardMetrics.isMobile ? 0.3 : 1);
   const y = isRaised ? baseY - 16 : baseY;
-  const rotate = isRaised ? 0 : postcard.jitterRotate;
-  const scale = isRaised ? 1.035 : POSTCARD_SCALE_OFFSETS[depth];
+  const rotate = isRaised
+    ? 0
+    : postcard.jitterRotate * (postcardMetrics.isMobile ? 0.35 : 1);
+  const scale = isRaised
+    ? isOpen && postcardMetrics.isMobile
+      ? 1
+      : 1.035
+    : POSTCARD_SCALE_OFFSETS[depth];
   // two-layer shadow: tight contact + soft ambient, both deeper when lifted
   const filter = isRaised
     ? "drop-shadow(0 30px 44px rgba(20, 12, 8, 0.40)) drop-shadow(0 8px 14px rgba(20, 12, 8, 0.26))"
@@ -707,9 +749,10 @@ function Postcard({
   const tiltY = useMotionValue(0);
   const rotateX = useSpring(tiltX, { stiffness: 150, damping: 18 });
   const rotateY = useSpring(tiltY, { stiffness: 150, damping: 18 });
+  const prefersReducedMotion = useReducedMotion();
 
   const handlePointerMove = (event) => {
-    if (!isRaised || event.pointerType === "touch") {
+    if (!isRaised || prefersReducedMotion || event.pointerType === "touch") {
       return;
     }
     const rect = event.currentTarget.getBoundingClientRect();
@@ -726,18 +769,12 @@ function Postcard({
 
   const ease = [0.22, 1, 0.36, 1];
   const moveTransition = { duration: moveDuration, ease };
-
-  // entrance: each card "arrives" with a staggered drop + fade, mount-only
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-  const entranceDelay = mounted ? 0 : 0.15 + stackPos * 0.22;
-  const entranceTransition = {
-    duration: mounted ? moveDuration : 0.9,
-    ease,
-    delay: entranceDelay,
-  };
+  const mobileStampWidth = 68;
+  const mobileStampOverlap = 8;
+  const mobileStampCount = postcard.stamps.length;
+  const mobileStampGroupWidth = mobileStampCount
+    ? mobileStampWidth + (mobileStampCount - 1) * mobileStampOverlap
+    : 0;
 
   return (
     <PostcardShell
@@ -747,21 +784,31 @@ function Postcard({
       }}
       onPointerMove={handlePointerMove}
       onPointerLeave={resetTilt}
-      style={{ zIndex, rotateX, rotateY }}
-      initial={{ opacity: 0, y: baseY + 70, scale: scale * 0.9 }}
-      animate={{ opacity: 1, x, y, rotate, scale, filter }}
-      exit={{ opacity: 0 }}
+      style={{
+        zIndex,
+        rotateX,
+        rotateY,
+      }}
+      initial={false}
+      animate={{
+        x,
+        y,
+        rotate,
+        scale,
+        filter,
+        height: postcardMetrics.isMobile
+          ? isOpen
+            ? postcardMetrics.openCardHeight
+            : postcardMetrics.cardHeight
+          : undefined,
+      }}
       transition={{
-        opacity: {
-          duration: mounted ? 0.4 : 0.9,
-          delay: entranceDelay,
-          ease: "easeOut",
-        },
         filter: moveTransition,
         x: moveTransition,
         rotate: moveTransition,
-        y: entranceTransition,
-        scale: entranceTransition,
+        y: moveTransition,
+        scale: moveTransition,
+        height: moveTransition,
       }}
     >
       <FlipCard
@@ -779,15 +826,6 @@ function Postcard({
         </PostcardFace>
 
         <PostcardFace $back>
-          {postcard.stamps.length > 0 && (
-            <StampLayer>
-              {postcard.stamps.map((stamp, stampIndex) => (
-                <Stamp key={`${stamp.name}-${stampIndex}`} $index={stampIndex}>
-                  <StampImage src={stamp.src} alt={stamp.name} />
-                </Stamp>
-              ))}
-            </StampLayer>
-          )}
           <LocationImprint>{postcard.location}</LocationImprint>
           <PostcardBack>
             <BackColumns>
@@ -804,7 +842,30 @@ function Postcard({
                   </ReactMarkdown>
                 </LetterBody>
               </Correspondence>
-              <AddressColumn>
+              <AddressColumn
+                style={{
+                  "--mobile-address-right": `${
+                    mobileStampCount ? mobileStampGroupWidth - 2 : 8
+                  }px`,
+                }}
+              >
+                {mobileStampCount > 0 && (
+                  <StampLayer $mobile={postcardMetrics.isMobile}>
+                    {postcard.stamps.map((stamp, stampIndex) => (
+                      <Stamp
+                        key={`${stamp.name}-${stampIndex}`}
+                        $index={stampIndex}
+                        $mobile={postcardMetrics.isMobile}
+                      >
+                        <StampImage
+                          src={stamp.src}
+                          alt={stamp.name}
+                          $mobile={postcardMetrics.isMobile}
+                        />
+                      </Stamp>
+                    ))}
+                  </StampLayer>
+                )}
                 <DividerImprint>{POSTCARD_IMPRINT}</DividerImprint>
                 <AddressBlock>
                   {postcard.recipient && (
@@ -838,7 +899,7 @@ function MarkdownImage({ src = "", alt = "" }) {
   return <MarkdownMediaImage src={resolvedSrc} alt={alt} loading="lazy" />;
 }
 
-function MarkdownLink({ href = "", children, ...props }) {
+function MarkdownLink({ href = "", children, title, className }) {
   const resolvedHref = resolveMediaSource(href);
 
   if (isVideoSource(resolvedHref)) {
@@ -856,7 +917,13 @@ function MarkdownLink({ href = "", children, ...props }) {
   }
 
   return (
-    <MediaLink href={resolvedHref} {...props}>
+    <MediaLink
+      href={resolvedHref}
+      title={title}
+      className={className}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
       {children}
     </MediaLink>
   );
@@ -937,11 +1004,13 @@ const GlobalStyle = createGlobalStyle`
     font: inherit;
   }
 
-  /* pause every idle animation while the tab is hidden (battery / CPU saver) */
-  html[data-hidden] *,
-  html[data-hidden] *::before,
-  html[data-hidden] *::after {
-    animation-play-state: paused !important;
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 `;
 
@@ -957,11 +1026,11 @@ const MusicFrame = styled.div`
 
 const MuteButton = styled.button`
   position: fixed;
-  top: clamp(14px, 2vw, 24px);
-  right: clamp(14px, 2vw, 24px);
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
   z-index: 50;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   padding: 0;
@@ -979,17 +1048,8 @@ const MuteButton = styled.button`
   }
 
   &:active {
-    transform: scale(0.88);
+    transform: scale(0.96);
   }
-`;
-
-const grainDrift = keyframes`
-  0% { transform: translate3d(0, 0, 0); }
-  20% { transform: translate3d(-2.6%, 1.8%, 0); }
-  40% { transform: translate3d(2%, -2.4%, 0); }
-  60% { transform: translate3d(-2.2%, -1.6%, 0); }
-  80% { transform: translate3d(1.6%, 2.2%, 0); }
-  100% { transform: translate3d(0, 0, 0); }
 `;
 
 const Desktop = styled.main`
@@ -1015,7 +1075,7 @@ const Desktop = styled.main`
   background-blend-mode: multiply, soft-light, screen, multiply, soft-light, normal;
   background-attachment: fixed;
 
-  /* faint scanlines (vignette lives on its own breathing layer) */
+  /* faint fixed scanlines keep the paper texture from feeling too flat */
   &::before {
     content: "";
     position: fixed;
@@ -1030,27 +1090,13 @@ const Desktop = styled.main`
     mix-blend-mode: multiply;
   }
 
-  /* slow-drifting film grain layer */
-  &::after {
-    content: "";
-    position: fixed;
-    inset: -10%;
-    z-index: 1;
-    pointer-events: none;
-    background: url("/textures/tactile-noise-light.png");
-    background-size: 280px 280px;
-    opacity: 0.13;
-    mix-blend-mode: overlay;
-    will-change: transform;
-    animation: ${grainDrift} 20s ease-in-out infinite;
+  @media (max-width: 680px) {
+    min-height: 100svh;
+    justify-content: flex-start;
+    padding: max(68px, calc(60px + env(safe-area-inset-top))) 16px
+      max(28px, env(safe-area-inset-bottom));
+    background-attachment: scroll;
   }
-`;
-
-const vignetteBreathe = keyframes`
-  /* edges stay pinned (scale never drops below 1); only the clear centre breathes —
-     the darkness advances toward, then recedes from, the middle of the page */
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.16); }
 `;
 
 const Vignette = styled.div`
@@ -1066,13 +1112,6 @@ const Vignette = styled.div`
     rgba(0, 0, 0, 0.42) 92%
   );
   mix-blend-mode: multiply;
-  will-change: transform;
-  animation: ${vignetteBreathe} 11s ease-in-out infinite;
-`;
-
-const stackBreathe = keyframes`
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  50% { transform: translateY(-3px) rotate(0.1deg); }
 `;
 
 const StackRail = styled.section`
@@ -1083,11 +1122,9 @@ const StackRail = styled.section`
   height: var(--postcard-stage-height);
   perspective: 1800px;
   transform-origin: 50% 30%;
-  /* gentle idle sway so the page is never dead-still */
-  animation: ${stackBreathe} 8s ease-in-out infinite;
 
   @media (max-width: 680px) {
-    height: var(--postcard-stage-height-mobile);
+    width: 100%;
   }
 `;
 
@@ -1101,8 +1138,10 @@ const PostcardShell = styled(motion.div)`
   margin: 0 auto;
   transform-origin: 50% 82%;
 
-  &:first-child {
-    margin-top: 0;
+  @media (max-width: 680px) {
+    width: 100%;
+    aspect-ratio: auto;
+    transform-origin: 50% 0%;
   }
 `;
 
@@ -1188,6 +1227,18 @@ const StampLayer = styled.div`
   align-items: flex-start;
   justify-content: flex-end;
   pointer-events: none;
+
+  ${(props) =>
+    props.$mobile &&
+    `
+      top: 4px;
+      right: 8px;
+      display: grid;
+      width: 68px;
+      height: 58px;
+      justify-items: end;
+      align-items: center;
+    `}
 `;
 
 const Stamp = styled.div`
@@ -1197,7 +1248,17 @@ const Stamp = styled.div`
   opacity: 0.85;
   mix-blend-mode: multiply;
   transform: ${(props) =>
-    `translateX(${props.$index * -20}px) rotate(${props.$index % 2 ? -3 : 2}deg)`};
+    props.$mobile
+      ? `translateX(${props.$index * -8}px) rotate(${props.$index % 2 ? -3 : 2}deg)`
+      : `translateX(${props.$index * -20}px) rotate(${props.$index % 2 ? -3 : 2}deg)`};
+
+  ${(props) =>
+    props.$mobile &&
+    `
+      grid-area: 1 / 1;
+      width: 68px;
+      height: 58px;
+    `}
 `;
 
 const StampImage = styled.img`
@@ -1205,6 +1266,8 @@ const StampImage = styled.img`
   width: 100%;
   object-fit: contain;
   filter: sepia(0.18) saturate(0.82) contrast(0.9);
+
+  ${(props) => props.$mobile && "height: 100%;"}
 `;
 
 const PostcardBack = styled.div`
@@ -1220,6 +1283,10 @@ const BackColumns = styled.div`
   display: flex;
   flex: 1;
   min-height: 0;
+
+  @media (max-width: 680px) {
+    flex-direction: column;
+  }
 `;
 
 const Correspondence = styled.div`
@@ -1230,6 +1297,13 @@ const Correspondence = styled.div`
   flex-direction: column;
   padding-left: clamp(18px, 3vw, 34px);
   padding-right: clamp(10px, 1.8vw, 20px);
+
+  @media (max-width: 680px) {
+    flex: 1 1 auto;
+    order: 1;
+    width: 100%;
+    padding: 6px 10px 12px;
+  }
 `;
 
 const AddressColumn = styled.div`
@@ -1240,6 +1314,13 @@ const AddressColumn = styled.div`
   flex-direction: column;
   padding-left: clamp(16px, 2.6vw, 28px);
   padding-bottom: clamp(20px, 3.6vw, 30px);
+
+  @media (max-width: 680px) {
+    flex: 0 0 88px;
+    order: -1;
+    width: 100%;
+    padding: 0;
+  }
 `;
 
 const DividerImprint = styled.div`
@@ -1255,6 +1336,10 @@ const DividerImprint = styled.div`
   font-size: clamp(0.4rem, 0.78vw, 0.52rem);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+
+  @media (max-width: 680px) {
+    display: none;
+  }
 `;
 
 const LocationImprint = styled.div`
@@ -1283,6 +1368,15 @@ const Postdate = styled.div`
   font-family: "DIY", "Courier New", monospace;
   font-size: clamp(0.5rem, 1vw, 0.64rem);
   letter-spacing: 0.02em;
+
+  @media (max-width: 680px) {
+    left: auto;
+    right: 8px;
+    bottom: 3px;
+    width: 68px;
+    text-align: center;
+    font-size: 0.56rem;
+  }
 `;
 
 const AddressBlock = styled.div`
@@ -1291,17 +1385,37 @@ const AddressBlock = styled.div`
   font-family: "Biro Script", "Segoe Print", cursive;
   opacity: 0.85;
   mix-blend-mode: multiply;
+
+  @media (max-width: 680px) {
+    position: absolute;
+    top: 50%;
+    left: 8px;
+    right: var(--mobile-address-right, 8px);
+    margin: 0;
+    transform: translateY(-50%);
+    overflow-wrap: anywhere;
+  }
 `;
 
 const Recipient = styled.div`
   font-size: clamp(1.3rem, 3.2vw, 1.9rem);
   line-height: 1.18;
+
+  @media (max-width: 680px) {
+    font-size: clamp(0.9rem, 4vw, 1.05rem);
+    line-height: 1.1;
+  }
 `;
 
 const AddressLine = styled.div`
   margin-top: 0.15em;
   font-size: clamp(1.05rem, 2.6vw, 1.5rem);
   line-height: 1.2;
+
+  @media (max-width: 680px) {
+    font-size: clamp(0.78rem, 3.5vw, 0.92rem);
+    line-height: 1.16;
+  }
 `;
 
 const LetterBody = styled.div`
@@ -1320,6 +1434,25 @@ const LetterBody = styled.div`
   &::-webkit-scrollbar {
     width: 0;
     height: 0;
+  }
+
+  @media (max-width: 680px) {
+    padding: 4px 4px 14px;
+    font-size: clamp(0.8rem, 3.8vw, 1rem);
+    line-height: 1.5;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+
+    &::-webkit-scrollbar {
+      width: 3px;
+      height: 3px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      border-radius: 3px;
+      background: rgba(60, 40, 31, 0.28);
+    }
   }
 
   p,
