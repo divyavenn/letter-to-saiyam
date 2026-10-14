@@ -33,7 +33,6 @@ const POSTCARD_HEIGHT = (680 * 9) / 16;
 const POSTCARD_ITEM_SIZE = 220;
 const POSTCARD_MOBILE_BREAKPOINT = 680;
 const MOBILE_FLIP_DURATION = 0.28;
-const MOBILE_SHUFFLE_LAYER_DELAY = 140;
 const POSTCARD_SCALE_OFFSETS = [1, 0.995, 0.99, 0.985, 0.98];
 // Buried cards are nudged sideways and tilted by a per-card random amount
 // (deterministic, derived from the slug) so they fan out and stay legible.
@@ -56,14 +55,14 @@ const STAMP_LIBRARY = Object.entries(stampFiles)
 function getPostcardMetrics(viewportWidth) {
   const isMobile = viewportWidth <= POSTCARD_MOBILE_BREAKPOINT;
   const sidePadding = isMobile
-    ? 16
+    ? Math.max(28, Math.min(48, viewportWidth * 0.08))
     : Math.max(16, Math.min(56, viewportWidth * 0.04));
   const cardWidth = Math.min(viewportWidth - sidePadding * 2, 680);
   const cardHeight = (cardWidth * 9) / 16;
   const stackStep = isMobile
     ? (cardHeight * POSTCARD_ITEM_SIZE) / POSTCARD_HEIGHT
     : POSTCARD_ITEM_SIZE;
-  return { isMobile, cardHeight, stackStep };
+  return { isMobile, sidePadding, cardHeight, stackStep };
 }
 
 function parseFrontmatter(source) {
@@ -613,7 +612,6 @@ function App() {
   // postcards are sorted most-recent-first; this fixed order is the vertical stack.
   const postcards = useMemo(loadPostcards, []);
   const [raisedId, setRaisedId] = useState(() => postcards[0]?.id ?? null);
-  const [topId, setTopId] = useState(() => postcards[0]?.id ?? null);
   const [openId, setOpenId] = useState(null);
   const pendingRaise = useRef(0);
   const prefersReducedMotion = useReducedMotion();
@@ -627,19 +625,6 @@ function App() {
     postcardMetrics.cardHeight + postcardMetrics.stackStep * (total - 1) + 48;
   const openIndex = postcards.findIndex((postcard) => postcard.id === openId);
 
-  useEffect(() => {
-    if (!postcardMetrics.isMobile || prefersReducedMotion) {
-      setTopId(raisedId);
-      return;
-    }
-    // Let both sheets start moving before handing over the top of the stack.
-    const layerTimer = window.setTimeout(
-      () => setTopId(raisedId),
-      MOBILE_SHUFFLE_LAYER_DELAY,
-    );
-    return () => window.clearTimeout(layerTimer);
-  }, [raisedId, postcardMetrics.isMobile, prefersReducedMotion]);
-
   useEffect(() => () => window.clearTimeout(pendingRaise.current), []);
 
   useEffect(() => {
@@ -652,7 +637,11 @@ function App() {
         resizeFrame = 0;
         const next = getPostcardMetrics(window.innerWidth);
         setPostcardMetrics((current) =>
-          current.cardHeight === next.cardHeight ? current : next,
+          current.cardHeight === next.cardHeight &&
+          current.sidePadding === next.sidePadding &&
+          current.isMobile === next.isMobile
+            ? current
+            : next,
         );
       });
     };
@@ -709,7 +698,10 @@ function App() {
       <>
         <GlobalStyle />
         <BackgroundMusic videoId={BG_MUSIC_VIDEO_ID} />
-        <Desktop onClick={handleBackgroundClick}>
+        <Desktop
+          onClick={handleBackgroundClick}
+          style={{ "--postcard-side-padding": `${postcardMetrics.sidePadding}px` }}
+        >
           <Vignette aria-hidden="true" />
           <StackRail
             aria-label="Postcard letters"
@@ -729,9 +721,6 @@ function App() {
                 postcardMetrics={postcardMetrics}
                 total={total}
                 isRaised={raisedId === postcard.id}
-                isOnTop={
-                  (postcardMetrics.isMobile && !prefersReducedMotion ? topId : raisedId) === postcard.id
-                }
                 isOpen={openId === postcard.id}
                 flipDuration={sfx.flip}
                 moveDuration={sfx.move}
@@ -752,7 +741,6 @@ function Postcard({
   postcardMetrics,
   total,
   isRaised,
-  isOnTop,
   isOpen,
   flipDuration,
   moveDuration,
@@ -762,27 +750,22 @@ function Postcard({
   const baseY = stackPos * stackStep;
   // Spatial slot (y) is fixed by date. Buried cards fan out with a random sideways
   // nudge + tilt; the lifted card straightens, centers, scales up and shadows deeper.
-  const x = isRaised ? 0 : postcard.jitterX * (postcardMetrics.isMobile ? 0.3 : 1);
+  const fanScale = postcardMetrics.isMobile
+    ? postcardMetrics.cardHeight / POSTCARD_HEIGHT
+    : 1;
+  const x = isRaised ? 0 : postcard.jitterX * fanScale;
   const y = isRaised ? baseY - 16 : baseY;
-  const rotate = isRaised
-    ? 0
-    : postcard.jitterRotate * (postcardMetrics.isMobile ? 0.35 : 1);
-  const scale = isRaised
-    ? postcardMetrics.isMobile
-      ? 1
-      : 1.035
-    : POSTCARD_SCALE_OFFSETS[depth];
+  const rotate = isRaised ? 0 : postcard.jitterRotate;
+  const scale = isRaised ? 1.035 : POSTCARD_SCALE_OFFSETS[depth];
   // two-layer shadow: tight contact + soft ambient, both deeper when lifted
   const filter = isRaised
     ? "drop-shadow(0 30px 44px rgba(20, 12, 8, 0.40)) drop-shadow(0 8px 14px rgba(20, 12, 8, 0.26))"
     : "drop-shadow(0 6px 10px rgba(20, 12, 8, 0.22)) drop-shadow(0 2px 3px rgba(20, 12, 8, 0.16))";
   const zIndex = isOpen
     ? total + 20
-    : isOnTop
+    : isRaised
       ? total + 10
-      : isRaised
-        ? total + 9
-        : total - stackPos;
+      : total - stackPos;
 
   // hover parallax tilt — only the lifted card, pointer devices, motion allowed
   const tiltX = useMotionValue(0);
@@ -815,11 +798,13 @@ function Postcard({
   const ease = [0.22, 1, 0.36, 1];
   const moveTransition = prefersReducedMotion
     ? { duration: 0 }
-    : postcardMetrics.isMobile
-      ? { type: "spring", duration: 0.42, bounce: 0 }
-      : { duration: moveDuration, ease };
+    : { duration: moveDuration, ease };
   const stamps = postcard.stamps.length > 0 && (
-    <StampLayer>
+    <StampLayer
+      style={{
+        "--stamp-stack-inset": `${Math.max(0, postcard.stamps.length - 1) * 8}px`,
+      }}
+    >
       {postcard.stamps.map((stamp, stampIndex) => (
         <Stamp key={`${stamp.name}-${stampIndex}`} $index={stampIndex}>
           <StampImage src={stamp.src} alt={stamp.name} />
@@ -892,8 +877,8 @@ function Postcard({
               <DividerImprint>{POSTCARD_IMPRINT}</DividerImprint>
               <MobileLetterBody onClick={(event) => event.stopPropagation()}>
                 <MobileAddress onClick={onActivate}>
-                  {stamps}
                   {address}
+                  {stamps}
                 </MobileAddress>
                 <Postdate>{formatPostcardDate(postcard.date)}</Postdate>
                 {letter}
@@ -1097,7 +1082,7 @@ const Desktop = styled.main`
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: clamp(40px, 8vh, 96px) clamp(16px, 4vw, 56px);
+  padding: clamp(40px, 8vh, 96px) var(--postcard-side-padding);
   background:
     url("/textures/subtle-grunge.png"),
     url("/textures/tactile-noise-light.png"),
@@ -1130,8 +1115,8 @@ const Desktop = styled.main`
   @media (max-width: 680px) {
     min-height: 100svh;
     justify-content: flex-start;
-    padding: max(68px, calc(60px + env(safe-area-inset-top))) 16px
-      max(28px, env(safe-area-inset-bottom));
+    padding: max(84px, calc(76px + env(safe-area-inset-top)))
+      var(--postcard-side-padding) max(48px, env(safe-area-inset-bottom));
     background-attachment: scroll;
   }
 `;
@@ -1163,7 +1148,7 @@ const StackRail = styled.section`
   @media (max-width: 680px) {
     width: 100%;
     /* Small viewport units keep the paper still as browser chrome retracts. */
-    --postcard-open-height: max(var(--postcard-height), min(calc(100svh - 148px), 680px));
+    --postcard-open-height: max(var(--postcard-height), min(calc(100svh - 180px), 680px));
     height: ${(props) => props.$open
       ? "max(var(--postcard-stage-height), calc(var(--open-postcard-offset) + var(--postcard-open-height)))"
       : "var(--postcard-stage-height)"};
@@ -1256,6 +1241,7 @@ const PostcardFace = styled.div`
         /* Size each face once; the flip only animates their shared rotation. */
         bottom: auto;
         height: var(--postcard-open-height);
+        padding: clamp(28px, 7vw, 40px) clamp(32px, 9vw, 48px);
       }
     `}
 
@@ -1376,7 +1362,7 @@ const DividerImprint = styled.div`
 
   @media (max-width: 680px) {
     left: auto;
-    right: 10px;
+    right: 16px;
     z-index: 3;
     writing-mode: vertical-rl;
     transform: translateY(-50%);
@@ -1397,6 +1383,10 @@ const LocationImprint = styled.div`
   font-size: clamp(0.4rem, 0.78vw, 0.52rem);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+
+  @media (max-width: 680px) {
+    left: 16px;
+  }
 `;
 
 const Postdate = styled.div`
@@ -1512,7 +1502,7 @@ const LetterBody = styled.div`
 const MobileLetterBody = styled(LetterBody)`
   position: relative;
   z-index: 2;
-  margin: 0 12px;
+  margin: 0;
   padding: 2px 2px 14px 0;
   overflow-wrap: anywhere;
 
@@ -1526,14 +1516,29 @@ const MobileLetterBody = styled(LetterBody)`
 
 const MobileAddress = styled.div`
   float: right;
-  width: 44%;
-  max-width: 156px;
-  margin: 0 0 14px 14px;
-  text-align: right;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  width: 58%;
+  max-width: 228px;
+  margin: 0 0 18px 16px;
+  text-align: left;
   cursor: pointer;
 
   ${AddressBlock} {
+    min-width: 0;
     margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  ${StampLayer} {
+    margin: 0;
+    padding-left: var(--stamp-stack-inset, 0px);
+  }
+
+  ${Stamp} {
+    width: clamp(44px, 12vw, 72px);
   }
 `;
 
