@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import styled, { createGlobalStyle } from "styled-components";
+import PostageAddress from "./PostageAddress.jsx";
 import {
   MotionConfig,
   motion,
@@ -799,25 +800,6 @@ function Postcard({
   const moveTransition = prefersReducedMotion
     ? { duration: 0 }
     : { duration: moveDuration, ease };
-  const stamps = postcard.stamps.length > 0 && (
-    <StampLayer
-      style={{
-        "--stamp-stack-inset": `${Math.max(0, postcard.stamps.length - 1) * 8}px`,
-      }}
-    >
-      {postcard.stamps.map((stamp, stampIndex) => (
-        <Stamp key={`${stamp.name}-${stampIndex}`} $index={stampIndex}>
-          <StampImage src={stamp.src} alt={stamp.name} />
-        </Stamp>
-      ))}
-    </StampLayer>
-  );
-  const address = (
-    <AddressBlock>
-      {postcard.recipient && <Recipient>to {postcard.recipient}</Recipient>}
-      {postcard.from && <AddressLine>from {postcard.from}</AddressLine>}
-    </AddressBlock>
-  );
   const letter = (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -876,17 +858,13 @@ function Postcard({
             <>
               <DividerImprint>{POSTCARD_IMPRINT}</DividerImprint>
               <MobileLetterBody onClick={(event) => event.stopPropagation()}>
-                <MobileAddress onClick={onActivate}>
-                  {address}
-                  {stamps}
-                </MobileAddress>
+                <MobileAddress postcard={postcard} isMobile onClick={onActivate} />
                 <Postdate>{formatPostcardDate(postcard.date)}</Postdate>
                 {letter}
               </MobileLetterBody>
             </>
           ) : (
             <>
-              {stamps}
               <PostcardBack>
                 <BackColumns>
                   <Correspondence onClick={(event) => event.stopPropagation()}>
@@ -894,7 +872,7 @@ function Postcard({
                   </Correspondence>
                   <AddressColumn>
                     <DividerImprint>{POSTCARD_IMPRINT}</DividerImprint>
-                    {address}
+                    <DesktopAddress postcard={postcard} isMobile={false} />
                     <Postdate>{formatPostcardDate(postcard.date)}</Postdate>
                   </AddressColumn>
                 </BackColumns>
@@ -1264,55 +1242,6 @@ const PostcardImage = styled.img`
   filter: sepia(0.05) saturate(0.92) contrast(0.98);
 `;
 
-const StampLayer = styled.div`
-  position: absolute;
-  top: clamp(6px, 1.2vw, 12px);
-  right: clamp(6px, 1.2vw, 12px);
-  z-index: 5;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  pointer-events: none;
-
-  @media (max-width: 680px) {
-    position: relative;
-    top: auto;
-    right: auto;
-    display: grid;
-    justify-items: end;
-    margin: 0 2px 10px 0;
-  }
-`;
-
-const Stamp = styled.div`
-  display: grid;
-  width: clamp(96px, 18vw, 148px);
-  place-items: center;
-  opacity: 0.85;
-  mix-blend-mode: multiply;
-  transform: ${(props) =>
-    `translateX(${props.$index * -20}px) rotate(${props.$index % 2 ? -3 : 2}deg)`};
-
-  @media (max-width: 680px) {
-    grid-area: 1 / 1;
-    width: clamp(64px, 18vw, 96px);
-    transform: ${(props) =>
-      `translateX(${props.$index * -8}px) rotate(${props.$index % 2 ? -3 : 2}deg)`};
-  }
-`;
-
-const StampImage = styled.img`
-  display: block;
-  width: 100%;
-  object-fit: contain;
-  filter: sepia(0.18) saturate(0.82) contrast(0.9);
-
-  @media (max-width: 680px) {
-    max-height: 84px;
-    object-position: right top;
-  }
-`;
-
 const PostcardBack = styled.div`
   position: relative;
   z-index: 2;
@@ -1411,36 +1340,6 @@ const Postdate = styled.div`
   }
 `;
 
-const AddressBlock = styled.div`
-  margin: auto 0;
-  color: #2f2620;
-  font-family: "Biro Script", "Segoe Print", cursive;
-  opacity: 0.85;
-  mix-blend-mode: multiply;
-  overflow-wrap: break-word;
-`;
-
-const Recipient = styled.div`
-  font-size: clamp(1.3rem, 3.2vw, 1.9rem);
-  line-height: 1.18;
-
-  @media (max-width: 680px) {
-    font-size: clamp(0.9rem, 4vw, 1.05rem);
-    line-height: 1.1;
-  }
-`;
-
-const AddressLine = styled.div`
-  margin-top: 0.15em;
-  font-size: clamp(1.05rem, 2.6vw, 1.5rem);
-  line-height: 1.2;
-
-  @media (max-width: 680px) {
-    font-size: clamp(0.78rem, 3.5vw, 0.92rem);
-    line-height: 1.16;
-  }
-`;
-
 const LetterBody = styled.div`
   flex: 1;
   min-height: 0;
@@ -1519,46 +1418,23 @@ const MobileLetterBody = styled(LetterBody)`
   }
 `;
 
-const MobileAddress = styled.div`
-  --mobile-stamp-width: clamp(64px, 18vw, 96px);
-  --mobile-stamp-outset: calc(var(--mobile-letter-inset-x) - 6px);
-  --mobile-postage-overlap: 4px;
+const MobileAddress = styled(PostageAddress)`
+  --postage-outset: calc(var(--mobile-letter-inset-x) - 6px);
   float: right;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr)
-    calc(var(--mobile-stamp-width) - var(--mobile-postage-overlap));
-  align-items: start;
-  /* Use the paper margin for postage without widening the text's exclusion. */
-  width: calc(58% + var(--mobile-stamp-outset));
-  max-width: calc(228px + var(--mobile-stamp-outset));
-  margin: 0 calc(0px - var(--mobile-stamp-outset)) 8px 6px;
-  text-align: left;
-  cursor: pointer;
+  width: calc(58% + var(--postage-outset));
+  max-width: calc(228px + var(--postage-outset));
+  margin: calc(6px - var(--mobile-letter-inset-y))
+    calc(0px - var(--postage-outset)) 8px 6px;
+`;
 
-  ${AddressBlock} {
-    grid-area: 2 / 1;
-    justify-self: end;
-    width: fit-content;
-    max-width: 100%;
-    min-width: 0;
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-
-  ${StampLayer} {
-    grid-area: 1 / 2;
-    grid-template-columns: minmax(0, 1fr);
-    justify-self: end;
-    justify-content: normal;
-    width: var(--mobile-stamp-width);
-    margin: calc(6px - var(--mobile-letter-inset-y)) 0
-      calc(0px - var(--mobile-postage-overlap));
-    padding-left: var(--stamp-stack-inset, 0px);
-  }
-
-  ${Stamp} {
-    width: 100%;
-  }
+const DesktopAddress = styled(PostageAddress)`
+  --postage-outset: calc(clamp(15px, 3.4vw, 30px) - 12px);
+  width: calc(100% + var(--postage-outset));
+  margin: calc(0px - var(--postage-outset))
+    calc(0px - var(--postage-outset)) 0 0;
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  scrollbar-width: none;
 `;
 
 const MarkdownMediaImage = styled.img`
