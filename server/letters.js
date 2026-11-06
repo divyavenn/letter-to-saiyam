@@ -1,4 +1,4 @@
-// Turns a letter sent from the composer into the files that get committed:
+// Turns a letter sent from the composer into the files that get written:
 // one markdown file per letter and its photos. Pure, so it's easy to test.
 import { randomBytes } from "node:crypto";
 import { isRecipientSlug, recipientSlug } from "../src/recipients.js";
@@ -94,14 +94,4 @@ export function letterFiles({ recipient, slug, fields, document, images }, nonce
   const markdown = buildLetter({ ...fields, image }, markdownBody);
   files.push({ path: `src/letters/${recipient}/${slug}.md`, content: Buffer.from(markdown) });
   return { files, markdown };
-}
-
-export function letterMessage(recipient, date) {
-  const [year, month, day] = date.split("-").map(Number);
-  const when = new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-  return `Add ${when} letter for ${recipient}`;
 }

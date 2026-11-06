@@ -1,12 +1,14 @@
 // The letters site on Render: each recipient's stack at /<slug>, the composer
-// at a secret /write/<path>, and the API behind both.
+// at a secret /write/<path>, and the API behind both. Letters are files on
+// Render's persistent disk (DATA_ROOT); locally they're the repo's own files.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import express from "express";
-import { LetterError, isRecipientSlug, letterFiles, letterMessage, readLetterRequest } from "./letters.js";
-import { diskStorage, githubStorage } from "./storage.js";
+import { writeArchive } from "./archive.js";
+import { LetterError, isRecipientSlug, letterFiles, readLetterRequest } from "./letters.js";
+import { copyMissing, diskStorage } from "./storage.js";
 
 const CODE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -68,10 +70,26 @@ export function createApp({ root = CODE_ROOT, dist = path.join(CODE_ROOT, "dist"
         slug = `${letter.fields.date}-${n}`;
       }
       const { files } = letterFiles({ ...letter, slug });
-      await storage.commit(files, letterMessage(letter.recipient, letter.fields.date));
+      await storage.commit(files);
       res.status(201).json({ recipient: letter.recipient, slug, url: `/${letter.recipient}` });
     } catch (error) {
       next(error);
+    }
+  });
+
+  // Everything, for safekeeping: a zip of every letter, photo and letters.json.
+  app.get("/api/archive", requireKey, async (req, res, next) => {
+    const day = new Date().toISOString().slice(0, 10);
+    res.set({
+      "Content-Type": "application/zip",
+      "Content-Disposition": `attachment; filename="letters-${day}.zip"`,
+      "Cache-Control": "no-store",
+    });
+    try {
+      await writeArchive(root, res);
+    } catch (error) {
+      if (res.headersSent) res.destroy(error);
+      else next(error);
     }
   });
 
@@ -104,26 +122,23 @@ export function createApp({ root = CODE_ROOT, dist = path.join(CODE_ROOT, "dist"
   return app;
 }
 
-function start() {
+async function start() {
   const root = process.env.DATA_ROOT ? path.resolve(process.env.DATA_ROOT) : CODE_ROOT;
   const production = process.env.NODE_ENV === "production";
   const writeKey = composerPath(process.env.WRITE_SECRET);
-  const disk = diskStorage(root);
-  const storage = process.env.GITHUB_TOKEN
-    ? githubStorage(
-        { token: process.env.GITHUB_TOKEN, repo: process.env.GITHUB_REPO, branch: process.env.GITHUB_BRANCH || "main" },
-        disk,
-      )
-    : disk;
+
+  // Bring over letters committed to the repo that the disk doesn't have yet.
+  const copied = await copyMissing(CODE_ROOT, root);
+  if (copied.length) console.log(`Copied ${copied.length} files from the repo into ${root}`);
 
   if (production && !writeKey) console.warn("WRITE_SECRET isn't set, so sending letters is turned off.");
-  if (production && storage.kind !== "github") {
-    console.warn("GITHUB_TOKEN isn't set: letters are saved on this server only and lost on the next deploy.");
+  if (production && root === CODE_ROOT) {
+    console.warn("DATA_ROOT isn't set: letters sent now are lost on the next deploy. Point it at the persistent disk.");
   }
 
   // Render sets PORT; locally the API sits beside Vite (see vite.config.js).
   const port = Number(process.env.PORT) || 5174;
-  createApp({ root, writeKey: writeKey || (production ? undefined : ""), storage }).listen(port, () => {
+  createApp({ root, writeKey: writeKey || (production ? undefined : ""), storage: diskStorage(root) }).listen(port, () => {
     const base = process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`;
     console.log(`Letters at ${base}/<recipient>`);
     if (writeKey) console.log(`Write letters at ${base}/write/${writeKey}`);

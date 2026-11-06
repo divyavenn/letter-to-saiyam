@@ -191,6 +191,7 @@ function Composer({ draft, onStartOver }) {
   const [recipient, setRecipient] = useState(() => draft?.recipient ?? localStorage.getItem(RECIPIENT_KEY) ?? "");
   const [recipients, setRecipients] = useState([]);
   const [sentTo, setSentTo] = useState(null);
+  const [downloading, setDownloading] = useState(false);
   const [status, setStatus] = useState({ kind: "idle" });
   const latest = useRef({});
   latest.current = { fields, recipient };
@@ -505,6 +506,26 @@ function Composer({ draft, onStartOver }) {
 
   const fail = (message) => setStatus({ kind: "error", message });
 
+  // Every letter for everyone, with photos and letters.json, as one zip.
+  const downloadAll = async () => {
+    setDownloading(true);
+    try {
+      const response = await fetch("/api/archive", { headers: { "x-write-key": WRITE_KEY } });
+      if (!response.ok) throw new Error("The letters couldn't be downloaded. Try again in a moment.");
+      const name = response.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] || "letters.zip";
+      const url = URL.createObjectURL(await response.blob());
+      const link = Object.assign(document.createElement("a"), { href: url, download: name });
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      fail(error instanceof TypeError ? "Couldn't reach the server to download your letters." : error.message);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const send = async () => {
     const photos = imageNodes(editor.state.doc).map(({ node }) => node.attrs);
     const slug = recipientSlug(recipient);
@@ -765,6 +786,9 @@ function Composer({ draft, onStartOver }) {
             {status.message}
           </StatusText>
         )}
+        <TextButton type="button" onClick={downloadAll} disabled={downloading}>
+          {downloading ? "gathering your letters…" : "download all letters"}
+        </TextButton>
       </Footer>
     </>
   );
@@ -1082,6 +1106,11 @@ const TextButton = styled.button`
   text-decoration: underline;
   text-underline-offset: 0.2em;
   cursor: pointer;
+
+  &:disabled {
+    cursor: progress;
+    opacity: 0.7;
+  }
 `;
 
 const SendRow = styled.div`

@@ -6,7 +6,9 @@ A stack of postcard letters for each person you write to, at their own page: `/s
 
 ## Deploying
 
-The button sets up everything in `render.yaml`. Render asks for one thing, `GITHUB_TOKEN`: a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for this repo with **Contents: read and write**. It stays in Render; you never paste it into a browser.
+The button sets up everything in `render.yaml`; there's nothing to fill in. Letters and photos are kept on a 1 GB persistent disk attached to the server, which Render snapshots daily.
+
+A disk needs a paid instance: Render's smallest one (shown with its price when you deploy) plus $0.25 a month for the disk. In return the site doesn't sleep when idle. Deploys restart the server, so the site is down for a few seconds during each one.
 
 Once it's up, the deploy logs print the composer's address:
 
@@ -16,9 +18,9 @@ Write letters at https://letters-xxxx.onrender.com/write/3f9a…
 
 That address is the key: anyone with it can send letters, so keep it to yourself. To change it, set a new `WRITE_SECRET` in Render.
 
-Sending a letter commits it to this repo, and Render redeploys with it. It's on the recipient's page right away.
+## Backing up
 
-On Render's free plan the site sleeps when idle, so the first visit after a while takes a few seconds.
+Below Send in the composer there's **download all letters**: a zip of every recipient's letters (markdown with their frontmatter), all the photos, and `letters.json`, which lists each letter's recipient, date, to, from, location, stamp, cover and photos. The disk is the only copy of letters sent from the composer, so download one now and then.
 
 ## Writing
 
@@ -26,7 +28,7 @@ In the composer, choose who a letter is for next to Send. Type a name that doesn
 
 ## Files
 
-Letters live in `src/letters/<recipient>/`, one markdown file per letter, named by date. Photos live in `public/images`. Frontmatter picks the cover photo and, optionally, the stamp:
+Letters live in `src/letters/<recipient>/`, one markdown file per letter, named by date. Photos live in `public/images`. On Render both live on the disk; letters committed to this repo are copied onto it on the next deploy, and nothing already on the disk is ever overwritten. Frontmatter picks the cover photo and, optionally, the stamp:
 
 ```md
 ---
@@ -54,6 +56,6 @@ npm install
 npm run dev
 ```
 
-That starts the site at http://localhost:5173 and the composer at http://localhost:5173/write/. Without a `GITHUB_TOKEN`, letters you send are written straight into `src/letters` and `public/images`.
+That starts the site at http://localhost:5173 and the composer at http://localhost:5173/write/. Letters you send locally are written straight into the repo's `src/letters` and `public/images`.
 
 `npm test` runs the unit and server tests; `npm run test:e2e` runs the browser tests.

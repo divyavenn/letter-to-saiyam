@@ -5,4 +5,4 @@ Any image appearing AFTER the letter itself starts should be inserted into the l
 If there is no image before the saluation, reuse one of the images in the letter itself as the cover.
 If there is only one image it should be the cover. If there are multiple, the topmost one should be used as the cover.
 
-After adding a letter, commit the letter and its associated images, then push the commit to the current branch’s remote.
+After adding a letter, commit the letter and its associated images, then push the commit to the current branch’s remote. The live site keeps letters on its own disk; a pushed letter is copied onto it on the next deploy, but never replaces a letter already there, so use a date that isn't taken (or add -2, -3).

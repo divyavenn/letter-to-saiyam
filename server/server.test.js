@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { composerPath, createApp } from "./index.js";
-import { isRecipientSlug, letterFiles, letterMessage, readLetterRequest, recipientSlug } from "./letters.js";
-import { diskStorage, githubStorage } from "./storage.js";
+import { isRecipientSlug, letterFiles, readLetterRequest, recipientSlug } from "./letters.js";
+import { copyMissing, diskStorage } from "./storage.js";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -42,7 +43,6 @@ test("a letter becomes markdown plus photos with unguessable names", () => {
     "---\ndate: 2026-11-05\nto: Ranju\nfrom: Divya\nimage: letter-ranju-2026-11-05-abc123-cover.png\nstamp: japan-mark.svg\n---\n\n" +
       "Dear Ranju,\n\n![](/images/letter-ranju-2026-11-05-abc123-1.png)\n\nLove,\n",
   );
-  assert.equal(letterMessage("ranju", "2026-11-05"), "Add November 5 letter for ranju");
 });
 
 test("bad requests are refused with a reason", () => {
@@ -130,33 +130,58 @@ test("sending writes the letter, taking the next name when the date is used", as
   assert.equal((await fetch(`${site.base}/api/letters/ranju`).then((r) => r.json())).letters.length, 1);
 });
 
-test("GitHub storage commits everything at once, then mirrors it to disk", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "letters-gh-"));
-  const calls = [];
-  const fakeFetch = async (url, { method = "GET", body } = {}) => {
-    const route = url.replace("https://api.github.com/repos/me/letters", "");
-    calls.push(`${method} ${route}`);
-    const json = (value, status = 200) => ({ ok: status < 400, status, json: async () => value });
-    if (route.startsWith("/contents/")) return json({ message: "Not Found" }, 404);
-    if (route === "/git/blobs") return json({ sha: `blob-${JSON.parse(body).content.length}` }, 201);
-    if (route === "/git/ref/heads/main") return json({ object: { sha: "parent" } });
-    if (route === "/git/commits/parent") return json({ sha: "parent", tree: { sha: "base" } });
-    if (route === "/git/trees") return json({ sha: "tree" }, 201);
-    if (route === "/git/commits") return json({ sha: "commit" }, 201);
-    if (route === "/git/refs/heads/main") return json({});
-    throw new Error(route);
-  };
-  const storage = githubStorage({ token: "t", repo: "me/letters", fetch: fakeFetch }, diskStorage(root));
-  assert.equal(await storage.exists("src/letters/ranju/2026-11-05.md"), false);
-  await storage.commit([{ path: "src/letters/ranju/2026-11-05.md", content: Buffer.from("hi") }], "Add letter");
-  assert.deepEqual(calls, [
-    "GET /contents/src/letters/ranju/2026-11-05.md?ref=main",
-    "POST /git/blobs",
-    "GET /git/ref/heads/main",
-    "GET /git/commits/parent",
-    "POST /git/trees",
-    "POST /git/commits",
-    "PATCH /git/refs/heads/main",
+test("repo letters are copied onto the disk, never over what's there", async () => {
+  const repo = await mkdtemp(path.join(tmpdir(), "letters-repo-"));
+  const disk = await mkdtemp(path.join(tmpdir(), "letters-disk-"));
+  await mkdir(path.join(repo, "src/letters/saiyam"), { recursive: true });
+  await mkdir(path.join(repo, "public/images"), { recursive: true });
+  await writeFile(path.join(repo, "src/letters/saiyam/2026-01-11.md"), "from the repo");
+  await writeFile(path.join(repo, "src/letters/saiyam/2026-06-28.md"), "older copy");
+  await writeFile(path.join(repo, "public/images/cover.png"), PNG);
+  await writeFile(path.join(repo, "public/images/.DS_Store"), "junk");
+  await mkdir(path.join(disk, "src/letters/saiyam"), { recursive: true });
+  await writeFile(path.join(disk, "src/letters/saiyam/2026-06-28.md"), "edited on the server");
+
+  const copied = await copyMissing(repo, disk);
+  assert.deepEqual(copied.sort(), ["public/images/cover.png", "src/letters/saiyam/2026-01-11.md"]);
+  assert.equal(await readFile(path.join(disk, "src/letters/saiyam/2026-06-28.md"), "utf8"), "edited on the server");
+  assert.deepEqual(await copyMissing(repo, disk), [], "a second deploy copies nothing");
+  assert.deepEqual(await copyMissing(repo, repo), [], "running from the repo itself is a no-op");
+});
+
+test("download all letters: a zip of letters, photos and their details", async (t) => {
+  const site = await serve();
+  t.after(site.close);
+  await mkdir(path.join(site.root, "public/images"), { recursive: true });
+  await writeFile(path.join(site.root, "public/images/seed.png"), PNG);
+  await writeFile(
+    path.join(site.root, "src/letters/saiyam/2026-11-05.md"),
+    "---\ndate: 2026-11-05\nto: Saiyam\nfrom: Divya\nlocation: the Presidio\nimage: seed.png\nstamp: japan-mark.svg\n---\n\nDear Saiyam,\n\n![](/images/seed.png)\n",
+  );
+
+  assert.equal((await fetch(`${site.base}/api/archive`)).status, 403);
+  const response = await fetch(`${site.base}/api/archive`, { headers: { "x-write-key": "secret-path-for-tests" } });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-disposition"), /attachment; filename="letters-\d{4}-\d{2}-\d{2}\.zip"/);
+  const zipPath = path.join(site.root, "out.zip");
+  await writeFile(zipPath, Buffer.from(await response.arrayBuffer()));
+
+  const listing = execFileSync("unzip", ["-Z1", zipPath], { encoding: "utf8" }).trim().split("\n").sort();
+  assert.deepEqual(listing, ["images/seed.png", "letters.json", "letters/saiyam/2026-11-05.md"]);
+  const manifest = JSON.parse(execFileSync("unzip", ["-p", zipPath, "letters.json"], { encoding: "utf8" }));
+  assert.deepEqual(manifest.letters, [
+    {
+      recipient: "saiyam",
+      letter: "2026-11-05",
+      file: "letters/saiyam/2026-11-05.md",
+      date: "2026-11-05",
+      to: "Saiyam",
+      from: "Divya",
+      location: "the Presidio",
+      stamp: "japan-mark.svg",
+      cover: "seed.png",
+      photos: ["seed.png"],
+    },
   ]);
-  assert.equal(await readFile(path.join(root, "src/letters/ranju/2026-11-05.md"), "utf8"), "hi");
+  assert.deepEqual(execFileSync("unzip", ["-p", zipPath, "images/seed.png"]), PNG);
 });

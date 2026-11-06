@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
@@ -461,4 +462,28 @@ test("the recipient list suggests existing pages and names new ones", async ({ p
   // Next time, the composer remembers who you last wrote to.
   await openComposer(page);
   await expect(page.getByLabel("Who it's for", { exact: true })).toHaveValue(github.recipient);
+});
+
+test("download all letters gives a zip of every letter, photo and their details", async ({ page }) => {
+  const github = await mailbox(page);
+  const editor = await openComposer(page);
+  await writeBody(page, editor);
+  await page.keyboard.type("For the archive.");
+  await pasteImage(editor);
+  await send(page);
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "download all letters" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^letters-\d{4}-\d{2}-\d{2}\.zip$/);
+  const zip = await download.path();
+  const files = execFileSync("unzip", ["-Z1", zip], { encoding: "utf8" }).split("\n");
+  expect(files).toContain("letters.json");
+  expect(files).toContain("letters/saiyam/2026-11-05.md");
+  expect(files).toContain(`letters/${github.recipient}/${DATE}.md`);
+  const { letters } = JSON.parse(execFileSync("unzip", ["-p", zip, "letters.json"], { encoding: "utf8" }));
+  const mine = letters.find((letter) => letter.recipient === github.recipient);
+  expect(mine).toMatchObject({ date: DATE, to: "Saiyam", from: "Divya" });
+  expect(files).toContain(`images/${mine.cover}`);
 });
