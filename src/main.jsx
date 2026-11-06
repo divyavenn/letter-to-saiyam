@@ -8,8 +8,24 @@ import React, {
 import { createRoot } from "react-dom/client";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import styled, { createGlobalStyle } from "styled-components";
+import styled, { createGlobalStyle, css } from "styled-components";
 import PostageAddress from "./PostageAddress.jsx";
+import { isRecipientSlug } from "./recipients.js";
+import {
+  POSTCARD_IMPRINT,
+  STAMP_LIBRARY,
+  fontFaces,
+  imprintText,
+  letterText,
+  mediaImage,
+  mobileAddressFloat,
+  mobileLetterBody,
+  mobileLetterInsets,
+  mobileLetterText,
+  mobilePaperShadow,
+  mobilePostdate,
+  paperBack,
+} from "./paper.js";
 import {
   MotionConfig,
   motion,
@@ -18,16 +34,19 @@ import {
   useSpring,
 } from "motion/react";
 
-const markdownFiles = import.meta.glob("./letters/*.md", {
-  eager: true,
-  query: "?raw",
-  import: "default",
-});
-const stampFiles = import.meta.glob("./stamps/*.svg", {
-  eager: true,
-  query: "?url",
-  import: "default",
-});
+// Each recipient's stack lives at /<slug>; the server only hands out the
+// letters for the slug asked for, so pages can't read each other's.
+const RECIPIENT = decodeURIComponent(window.location.pathname.split("/")[1] || "").toLowerCase();
+
+async function fetchLetters(recipient) {
+  if (!isRecipientSlug(recipient)) return [];
+  try {
+    const response = await fetch(`/api/letters/${encodeURIComponent(recipient)}`);
+    return response.ok ? (await response.json()).letters : [];
+  } catch {
+    return [];
+  }
+}
 
 const POSTCARD_HEIGHT = (680 * 9) / 16;
 // Keep the mobile stack at the same overlap ratio as the desktop stack.
@@ -42,16 +61,8 @@ const POSTCARD_MAX_JITTER_ROTATE = 3;
 const IMAGE_FOLDER = "/images/";
 const FALLBACK_POSTCARD_IMAGE = "pressed-flower.png";
 const BG_MUSIC_VIDEO_ID = "R-bI0AhSyU0";
-const POSTCARD_IMPRINT =
-  "GENUINE POST CARD ISSUED BY D. VENN, FROWNED UPON BY UNCLE SAM, NO POSTAGE REQ.";
 const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "ogg", "mov", "m4v"]);
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "avif", "svg"]);
-const STAMP_LIBRARY = Object.entries(stampFiles)
-  .map(([path, src]) => ({
-    name: path.split("/").pop(),
-    src,
-  }))
-  .sort((a, b) => a.name.localeCompare(b.name));
 
 function getPostcardMetrics(viewportWidth) {
   const isMobile = viewportWidth <= POSTCARD_MOBILE_BREAKPOINT;
@@ -188,11 +199,10 @@ function getRecipient(fields, body) {
   return salutation ? salutation[1].trim() : "";
 }
 
-function loadPostcards() {
-  return Object.entries(markdownFiles)
-    .map(([path, source]) => {
+function loadPostcards(letters) {
+  return letters
+    .map(({ id: slug, source }) => {
       const { fields, body } = parseFrontmatter(source);
-      const slug = path.split("/").pop().replace(/\.md$/, "");
       const seed = `${slug}:${fields.date || ""}`;
 
       return {
@@ -609,9 +619,32 @@ function BackgroundMusic({ videoId }) {
   );
 }
 
-function App() {
+// Waits for the recipient's letters; a page with none is a blank envelope.
+function Root() {
+  const [letters, setLetters] = useState(null);
+
+  useEffect(() => {
+    fetchLetters(RECIPIENT).then(setLetters);
+  }, []);
+
+  if (letters === null) return <GlobalStyle />;
+  if (letters.length === 0) {
+    return (
+      <>
+        <GlobalStyle />
+        <Desktop>
+          <Vignette aria-hidden="true" />
+          <BlankEnvelope aria-label="An envelope with nothing inside" />
+        </Desktop>
+      </>
+    );
+  }
+  return <App letters={letters} />;
+}
+
+function App({ letters }) {
   // postcards are sorted most-recent-first; this fixed order is the vertical stack.
-  const postcards = useMemo(loadPostcards, []);
+  const postcards = useMemo(() => loadPostcards(letters), [letters]);
   const [raisedId, setRaisedId] = useState(() => postcards[0]?.id ?? null);
   const [openId, setOpenId] = useState(null);
   const pendingRaise = useRef(0);
@@ -758,10 +791,6 @@ function Postcard({
   const y = isRaised ? baseY - 16 : baseY;
   const rotate = isRaised ? 0 : postcard.jitterRotate;
   const scale = isRaised ? 1.035 : POSTCARD_SCALE_OFFSETS[depth];
-  // two-layer shadow: tight contact + soft ambient, both deeper when lifted
-  const filter = isRaised
-    ? "drop-shadow(0 30px 44px rgba(20, 12, 8, 0.40)) drop-shadow(0 8px 14px rgba(20, 12, 8, 0.26))"
-    : "drop-shadow(0 6px 10px rgba(20, 12, 8, 0.22)) drop-shadow(0 2px 3px rgba(20, 12, 8, 0.16))";
   const zIndex = isOpen
     ? total + 20
     : isRaised
@@ -817,70 +846,64 @@ function Postcard({
       }}
       onPointerMove={handlePointerMove}
       onPointerLeave={resetTilt}
-      style={{
-        zIndex,
-        rotateX,
-        rotateY,
-      }}
+      style={{ zIndex }}
       initial={false}
+      // One transform string, so Motion can hand it to the compositor; the
+      // x/y/rotate/scale shorthands are rebuilt on the main thread every frame.
       animate={{
-        x,
-        y,
-        rotate,
-        scale,
-        filter: postcardMetrics.isMobile ? "none" : filter,
+        transform: `translateX(${x}px) translateY(${y}px) rotate(${rotate}deg) scale(${scale})`,
       }}
-      transition={{
-        filter: moveTransition,
-        x: moveTransition,
-        rotate: moveTransition,
-        y: moveTransition,
-        scale: moveTransition,
-      }}
+      transition={moveTransition}
     >
-      <FlipCard
-        $open={isOpen}
-        style={{
-          "--flip-duration": `${postcardMetrics.isMobile ? MOBILE_FLIP_DURATION : flipDuration}s`,
-        }}
-        aria-label={`Postcard to ${postcard.recipient || "you"}, ${isOpen ? "letter back" : "postcard front"}`}
-      >
-        <PostcardFace $front>
-          <PostcardImage
-            src={postcard.image}
-            alt={`Postcard to ${postcard.recipient || "you"}, front`}
-          />
-        </PostcardFace>
+      <CardTilt style={{ rotateX, rotateY }}>
+        {/* The lifted shadow fades in over the resting one; fading opacity is
+            cheap, where animating a drop-shadow filter repaints the card. */}
+        <CardShadow aria-hidden="true" initial={false} animate={{ opacity: isRaised ? 0 : 1 }} transition={moveTransition} />
+        <CardShadow aria-hidden="true" $raised initial={false} animate={{ opacity: isRaised ? 1 : 0 }} transition={moveTransition} />
+        <FlipCard
+          $open={isOpen}
+          style={{
+            "--flip-duration": `${postcardMetrics.isMobile ? MOBILE_FLIP_DURATION : flipDuration}s`,
+          }}
+          aria-label={`Postcard to ${postcard.recipient || "you"}, ${isOpen ? "letter back" : "postcard front"}`}
+        >
+          <PostcardFace $front data-face="front">
+            <PostcardImage
+              src={postcard.image}
+              alt={`Postcard to ${postcard.recipient || "you"}, front`}
+            />
+          </PostcardFace>
 
-        <PostcardFace $back>
-          <LocationImprint>{postcard.location}</LocationImprint>
-          {postcardMetrics.isMobile ? (
-            <>
-              <DividerImprint>{POSTCARD_IMPRINT}</DividerImprint>
-              <MobileLetterBody onClick={(event) => event.stopPropagation()}>
-                <MobileAddress postcard={postcard} isMobile onClick={onActivate} />
-                <Postdate>{formatPostcardDate(postcard.date)}</Postdate>
-                {letter}
-              </MobileLetterBody>
-            </>
-          ) : (
-            <>
-              <PostcardBack>
-                <BackColumns>
-                  <Correspondence onClick={(event) => event.stopPropagation()}>
-                    <LetterBody>{letter}</LetterBody>
-                  </Correspondence>
-                  <AddressColumn>
-                    <DividerImprint>{POSTCARD_IMPRINT}</DividerImprint>
-                    <DesktopAddress postcard={postcard} isMobile={false} />
-                    <Postdate>{formatPostcardDate(postcard.date)}</Postdate>
-                  </AddressColumn>
-                </BackColumns>
-              </PostcardBack>
-            </>
-          )}
-        </PostcardFace>
-      </FlipCard>
+          <PostcardFace $back data-face="back">
+            <LocationImprint>{postcard.location}</LocationImprint>
+            {postcardMetrics.isMobile ? (
+              <>
+                <DividerImprint>{POSTCARD_IMPRINT}</DividerImprint>
+                <MobileLetterBody onClick={(event) => event.stopPropagation()}>
+                  <MobileAddress postcard={postcard} isMobile onClick={onActivate} />
+                  <Postdate>{formatPostcardDate(postcard.date)}</Postdate>
+                  {letter}
+                </MobileLetterBody>
+              </>
+            ) : (
+              <>
+                <PostcardBack>
+                  <BackColumns>
+                    <Correspondence onClick={(event) => event.stopPropagation()}>
+                      <LetterBody>{letter}</LetterBody>
+                    </Correspondence>
+                    <AddressColumn>
+                      <DividerImprint>{POSTCARD_IMPRINT}</DividerImprint>
+                      <DesktopAddress postcard={postcard} isMobile={false} />
+                      <Postdate>{formatPostcardDate(postcard.date)}</Postdate>
+                    </AddressColumn>
+                  </BackColumns>
+                </PostcardBack>
+              </>
+            )}
+          </PostcardFace>
+        </FlipCard>
+      </CardTilt>
     </PostcardShell>
   );
 }
@@ -930,45 +953,7 @@ function MarkdownLink({ href = "", children, title, className }) {
 }
 
 const GlobalStyle = createGlobalStyle`
-  @font-face {
-    font-family: "Biro Script";
-    src:
-      url("/fonts/biro_script.woff2") format("woff2"),
-      url("/fonts/biro_script.ttf") format("truetype");
-    font-weight: normal;
-    font-style: normal;
-    font-display: swap;
-  }
-
-  @font-face {
-    font-family: "Oceanside Typewriter";
-    src:
-      url("/fonts/oceanside_typewriter.woff2") format("woff2"),
-      url("/fonts/oceanside_typewriter.ttf") format("truetype");
-    font-weight: normal;
-    font-style: normal;
-    font-display: swap;
-  }
-
-  @font-face {
-    font-family: "Mom Typewriter";
-    src:
-      url("/fonts/mom_typewriter.woff2") format("woff2"),
-      url("/fonts/mom_typewriter.ttf") format("truetype");
-    font-weight: normal;
-    font-style: normal;
-    font-display: swap;
-  }
-
-  @font-face {
-    font-family: "DIY";
-    src:
-      url("/fonts/diy.woff2") format("woff2"),
-      url("/fonts/diy.ttf") format("truetype");
-    font-weight: normal;
-    font-style: normal;
-    font-display: swap;
-  }
+  ${fontFaces}
 
   *,
   *::before,
@@ -1004,12 +989,17 @@ const GlobalStyle = createGlobalStyle`
     font: inherit;
   }
 
+  html {
+    /* Our own press states stand in for the grey flash on tap. */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Movement is turned off per element (see FlipCard); fades stay. */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
     *::after {
       scroll-behavior: auto !important;
-      transition-duration: 0.01ms !important;
     }
   }
 `;
@@ -1114,6 +1104,28 @@ const Vignette = styled.div`
   mix-blend-mode: multiply;
 `;
 
+const BlankEnvelope = styled.div`
+  ${paperBack}
+  position: relative;
+  z-index: 10;
+  width: min(100%, 520px);
+  aspect-ratio: 16 / 10;
+  border-radius: 5px;
+  box-shadow:
+    0 30px 44px rgba(20, 12, 8, 0.32),
+    0 8px 14px rgba(20, 12, 8, 0.2),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.85);
+
+  /* The flap, folded down. */
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 38% 0;
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+    background: linear-gradient(180deg, rgba(94, 57, 36, 0.06), rgba(94, 57, 36, 0.14));
+  }
+`;
+
 const StackRail = styled.section`
   position: relative;
   z-index: 10;
@@ -1142,10 +1154,35 @@ const PostcardShell = styled(motion.div)`
   aspect-ratio: 16 / 9;
   margin: 0 auto;
   transform-origin: 50% 82%;
+  /* Depth for the hover tilt on CardTilt. */
+  perspective: 1800px;
 
   @media (max-width: 680px) {
     width: 100%;
     transform-origin: 50% 0%;
+  }
+`;
+
+const CardTilt = styled(motion.div)`
+  position: relative;
+  width: 100%;
+  height: 100%;
+`;
+
+// Two-layer shadow: tight contact + soft ambient, both deeper when lifted.
+const CardShadow = styled(motion.div)`
+  position: absolute;
+  inset: 0;
+  border-radius: 5px;
+  pointer-events: none;
+  box-shadow: ${(props) =>
+    props.$raised
+      ? "0 30px 44px rgba(20, 12, 8, 0.40), 0 8px 14px rgba(20, 12, 8, 0.26)"
+      : "0 6px 10px rgba(20, 12, 8, 0.22), 0 2px 3px rgba(20, 12, 8, 0.16)"};
+
+  /* Mobile cards carry their own shadow on each face. */
+  @media (max-width: 680px) {
+    display: none;
   }
 `;
 
@@ -1156,7 +1193,29 @@ const FlipCard = styled.article`
   cursor: ${(props) => (props.$open ? "default" : "pointer")};
   transform-style: preserve-3d;
   transform: rotateY(${(props) => props.$open ? 180 : 0}deg);
-  transition: transform var(--flip-duration) cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--flip-duration) cubic-bezier(0.77, 0, 0.175, 1);
+
+  /* Without the turn, the two faces crossfade instead of swapping abruptly. */
+  @media (prefers-reduced-motion: reduce) {
+    transform: none;
+    transition: none;
+
+    & > [data-face] {
+      backface-visibility: visible;
+      transition: opacity 200ms ease;
+    }
+
+    & > [data-face="front"] {
+      opacity: ${(props) => (props.$open ? 0 : 1)};
+      pointer-events: ${(props) => (props.$open ? "none" : "auto")};
+    }
+
+    & > [data-face="back"] {
+      transform: none;
+      opacity: ${(props) => (props.$open ? 1 : 0)};
+      pointer-events: ${(props) => (props.$open ? "auto" : "none")};
+    }
+  }
 `;
 
 const PostcardFace = styled.div`
@@ -1204,21 +1263,15 @@ const PostcardFace = styled.div`
 
   ${(props) =>
     props.$back &&
-    `
+    css`
       display: flex;
       flex-direction: column;
       transform: rotateY(180deg);
-      background:
-        url("/textures/cream-paper.png"),
-        url("/textures/textured-paper.png"),
-        #faf7f0;
-      background-size: auto, 500px 500px, auto;
-      background-blend-mode: multiply, soft-light, normal;
+      ${paperBack}
 
       @media (max-width: 680px) {
         /* Size each face once; the flip only animates their shared rotation. */
-        --mobile-letter-inset-y: clamp(28px, 7vw, 40px);
-        --mobile-letter-inset-x: clamp(32px, 9vw, 48px);
+        ${mobileLetterInsets}
         bottom: auto;
         height: var(--postcard-open-height);
         padding: var(--mobile-letter-inset-y) var(--mobile-letter-inset-x);
@@ -1226,11 +1279,7 @@ const PostcardFace = styled.div`
     `}
 
   @media (max-width: 680px) {
-    box-shadow:
-      0 8px 18px rgba(20, 12, 8, 0.24),
-      0 2px 4px rgba(20, 12, 8, 0.16),
-      inset 0 1.5px 0 rgba(255, 255, 255, 0.85),
-      inset 0 -1.5px 0 rgba(60, 38, 22, 0.2);
+    ${mobilePaperShadow}
   }
 `;
 
@@ -1285,11 +1334,7 @@ const DividerImprint = styled.div`
   transform-origin: center;
   white-space: nowrap;
   pointer-events: none;
-  color: rgba(46, 58, 107, 0.9);
-  font-family: "DIY", "Courier New", monospace;
-  font-size: clamp(0.4rem, 0.78vw, 0.52rem);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  ${imprintText}
 
   @media (max-width: 680px) {
     left: auto;
@@ -1309,11 +1354,7 @@ const LocationImprint = styled.div`
   transform-origin: center;
   white-space: nowrap;
   pointer-events: none;
-  color: rgba(46, 58, 107, 0.9);
-  font-family: "DIY", "Courier New", monospace;
-  font-size: clamp(0.4rem, 0.78vw, 0.52rem);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  ${imprintText}
 
   @media (max-width: 680px) {
     left: 16px;
@@ -1333,10 +1374,7 @@ const Postdate = styled.div`
 
   @media (max-width: 680px) {
     position: static;
-    margin: 2px 0 18px;
-    text-align: left;
-    font-size: 0.64rem;
-    line-height: 1.4;
+    ${mobilePostdate}
   }
 `;
 
@@ -1345,12 +1383,7 @@ const LetterBody = styled.div`
   min-height: 0;
   overflow: auto;
   padding: 2px 4px 14px 0;
-  color: #3c281f;
-  font-family: "Oceanside Typewriter", "Courier New", ui-monospace, monospace;
-  font-size: clamp(0.82rem, 1.7vw, 1rem);
-  line-height: 1.45;
-  opacity: 0.85;
-  mix-blend-mode: multiply; /* ink sits in the paper rather than on top */
+  ${letterText}
   scrollbar-width: none;
 
   &::-webkit-scrollbar {
@@ -1359,8 +1392,7 @@ const LetterBody = styled.div`
   }
 
   @media (max-width: 680px) {
-    font-size: clamp(0.82rem, 3.4vw, 1rem);
-    line-height: 1.5;
+    ${mobileLetterText}
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
@@ -1375,56 +1407,14 @@ const LetterBody = styled.div`
       background: rgba(60, 40, 31, 0.28);
     }
   }
-
-  p,
-  ul,
-  ol,
-  blockquote {
-    margin: 0 0 0.9em;
-  }
-
-  strong {
-    color: #2d1d17;
-  }
-
-  blockquote {
-    padding-left: 16px;
-    color: rgba(60, 40, 31, 0.72);
-    font-style: italic;
-  }
-
-  a {
-    color: #7b4229;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 0.18em;
-  }
 `;
 
 const MobileLetterBody = styled(LetterBody)`
-  position: relative;
-  z-index: 2;
-  /* Include the upper/right paper margin in the scroller so postage isn't clipped. */
-  margin: calc(8px - var(--mobile-letter-inset-y))
-    calc(8px - var(--mobile-letter-inset-x)) 0 0;
-  padding: calc(var(--mobile-letter-inset-y) - 6px)
-    calc(var(--mobile-letter-inset-x) - 6px) 14px 0;
-  overflow-wrap: anywhere;
-
-  /* Keep Markdown in this flow so paragraphs widen as they pass the address. */
-  img,
-  video,
-  hr {
-    clear: both;
-  }
+  ${mobileLetterBody}
 `;
 
 const MobileAddress = styled(PostageAddress)`
-  --postage-outset: calc(var(--mobile-letter-inset-x) - 6px);
-  float: right;
-  width: calc(58% + var(--postage-outset));
-  max-width: calc(228px + var(--postage-outset));
-  margin: calc(6px - var(--mobile-letter-inset-y))
-    calc(0px - var(--postage-outset)) 8px 6px;
+  ${mobileAddressFloat}
 `;
 
 const DesktopAddress = styled(PostageAddress)`
@@ -1438,17 +1428,7 @@ const DesktopAddress = styled(PostageAddress)`
 `;
 
 const MarkdownMediaImage = styled.img`
-  display: block;
-  width: min(100%, 420px);
-  max-height: 360px;
-  margin: 1.2rem auto;
-  object-fit: contain;
-  background: rgba(239, 231, 214, 0.7);
-  border-radius: 6px;
-  filter: sepia(0.08) saturate(0.9);
-  box-shadow:
-    0 10px 18px rgba(72, 43, 29, 0.16),
-    inset 0 0 0 1px rgba(72, 43, 29, 0.08);
+  ${mediaImage}
 `;
 
 const MarkdownVideo = styled.video`
@@ -1469,6 +1449,6 @@ const MediaLink = styled.a`
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <App />
+    <Root />
   </React.StrictMode>,
 );

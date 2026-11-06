@@ -1,0 +1,28 @@
+# One-click deploy: https://render.com/deploy?repo=https://github.com/divyavenn/letter-to-saiyam
+# Render asks for GITHUB_TOKEN when the Blueprint is created; everything else is filled in.
+services:
+  - type: web
+    name: letters
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    # Each sent letter is a commit, which redeploys the site with it included.
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # A fine-grained token for this repo with Contents: read and write.
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPO
+        value: divyavenn/letter-to-saiyam
+      - key: GITHUB_BRANCH
+        value: main
+      # The composer's secret address, /write/<path>, is derived from this and
+      # printed in the deploy logs.
+      - key: WRITE_SECRET
+        generateValue: true

@@ -5,24 +5,44 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node --watch server/index.js",
+    "dev:web": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "start": "node server/index.js",
+    "test": "node --test",
+    "test:e2e": "playwright test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@chenglou/pretext": "^0.0.9",
+    "@floating-ui/dom": "^1.8.0",
+    "@tiptap/core": "^3.33.0",
+    "@tiptap/extension-bubble-menu": "^3.33.0",
+    "@tiptap/extension-image": "^3.33.0",
+    "@tiptap/pm": "^3.33.0",
+    "@tiptap/react": "^3.33.0",
+    "@tiptap/starter-kit": "^3.33.0",
     "@vitejs/plugin-react": "^6.0.3",
     "claude": "^0.1.1",
+    "express": "^5.3.0",
     "motion": "^12.42.0",
     "motion-plus": "^1.5.1",
+    "prosemirror-markdown": "^1.13.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "styled-components": "^6.4.3",
     "vite": "^8.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "concurrently": "^10.0.6"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

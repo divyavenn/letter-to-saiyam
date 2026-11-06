@@ -55,7 +55,11 @@ function assertLayout(source, width, stamps) {
 }
 
 test("every letter's address fits mobile and desktop widths without losing text", () => {
-  for (const file of readdirSync(new URL("./letters/", import.meta.url))) {
+  // Letters live in one folder per recipient.
+  const files = readdirSync(new URL("./letters/", import.meta.url)).flatMap((recipient) =>
+    readdirSync(new URL(`./letters/${recipient}/`, import.meta.url)).map((file) => `${recipient}/${file}`),
+  );
+  for (const file of files) {
     const source = readFileSync(new URL(`./letters/${file}`, import.meta.url), "utf8");
     const to = source.match(/^to:\s*(.*)$/m)?.[1];
     const from = source.match(/^from:\s*(.*)$/m)?.[1];

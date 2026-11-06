@@ -1,7 +1,8 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { prepareWithSegments } from "@chenglou/pretext";
-import styled from "styled-components";
+import styled, { css, keyframes } from "styled-components";
 import { layoutAddress } from "./address-layout.js";
+import InlineField from "./InlineField.jsx";
 
 const FONT_FAMILY = '"Biro Script", "Segoe Print", cursive';
 const stampCache = new Map();
@@ -46,11 +47,15 @@ function readStamp(image) {
   return asset;
 }
 
-export default function PostageAddress({ postcard, isMobile, className, onClick }) {
+// With onEdit, each address line can be clicked and retyped where it's printed.
+// postmark: an image URL that cancels the first stamp (shown once a letter is sent).
+export default function PostageAddress({ postcard, isMobile, className, onClick, onStampClick, onEdit, postmark }) {
   const host = useRef(null);
   const [metrics, setMetrics] = useState(null);
   const [assets, setAssets] = useState({});
   const [prepared, setPrepared] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const editable = Boolean(onEdit);
 
   useLayoutEffect(() => {
     let frame = 0;
@@ -84,8 +89,9 @@ export default function PostageAddress({ postcard, isMobile, className, onClick 
     if (!toSize || !fromSize) return;
     let cancelled = false;
     const paragraphs = [
-      { kind: "to", text: postcard.recipient && `to ${postcard.recipient}`, fontSize: toSize, lineHeight: Math.ceil(toSize * (isMobile ? 1.1 : 1.18)) },
-      { kind: "from", text: postcard.from && `from ${postcard.from}`, fontSize: fromSize, lineHeight: Math.ceil(fromSize * (isMobile ? 1.16 : 1.2)) },
+      // An editable line stays put while empty, so it can be filled back in.
+      { kind: "to", text: (postcard.recipient || editable) && `to${postcard.recipient ? ` ${postcard.recipient}` : ""}`, fontSize: toSize, lineHeight: Math.ceil(toSize * (isMobile ? 1.1 : 1.18)) },
+      { kind: "from", text: (postcard.from || editable) && `from${postcard.from ? ` ${postcard.from}` : ""}`, fontSize: fromSize, lineHeight: Math.ceil(fromSize * (isMobile ? 1.16 : 1.2)) },
     ].filter((paragraph) => paragraph.text);
     const prepare = async () => {
       await Promise.allSettled(paragraphs.map((paragraph) => document.fonts.load(`${paragraph.fontSize}px ${FONT_FAMILY}`, paragraph.text)));
@@ -97,7 +103,7 @@ export default function PostageAddress({ postcard, isMobile, className, onClick 
     };
     prepare().catch((error) => console.warn("Unable to lay out postcard address", error));
     return () => { cancelled = true; };
-  }, [postcard.recipient, postcard.from, toSize, fromSize, isMobile]);
+  }, [postcard.recipient, postcard.from, toSize, fromSize, isMobile, editable]);
 
   const shapes = useMemo(() => postcard.stamps.map((stamp, index) => {
     const asset = assets[stamp.src] || { ratio: 1, contour: rectangleContour };
@@ -132,18 +138,77 @@ export default function PostageAddress({ postcard, isMobile, className, onClick 
             setAssets((current) => current[stamp.src] === asset ? current : { ...current, [stamp.src]: asset });
           }}
           onError={() => setAssets((current) => ({ ...current, [stamp.src]: { ratio: 1, contour: rectangleContour } }))}
-          style={{ left: stamp.left, top: stamp.top, width: stamp.width, height: stamp.height, transform: `rotate(${stamp.angle}deg)` }}
+          style={{
+            left: stamp.left, top: stamp.top, width: stamp.width, height: stamp.height, transform: `rotate(${stamp.angle}deg)`,
+            ...(onStampClick && { pointerEvents: "auto", cursor: "pointer" }),
+          }}
+          $pressable={Boolean(onStampClick)}
+          {...(onStampClick && {
+            role: "button",
+            tabIndex: 0,
+            "aria-label": `Stamp: ${stamp.name.replace(/\.svg$/, "").replace(/-/g, " ")}. Change stamp`,
+            onClick: (event) => { event.stopPropagation(); onStampClick(); },
+            onKeyDown: (event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              onStampClick();
+            },
+          })}
         />
       ))}
+      {postmark && shapes[0] && (() => {
+        // Struck across the stamp's left edge, as a post office would.
+        const stamp = shapes[0];
+        const size = Math.min(72, Math.max(48, stamp.height * 1.05));
+        return (
+          <Postmark
+            src={postmark}
+            alt="Postmarked"
+            style={{ left: stamp.left - size * 0.45, top: stamp.top + stamp.height / 2 - size / 2, width: size, height: size }}
+          />
+        );
+      })()}
       {layout ? (
         <AddressInk role="group" aria-label={fullAddress}>
-          {layout.lines.map((line, index) => (
-            <AddressTextLine
-              key={index}
-              aria-hidden="true"
-              style={{ left: line.left, top: line.top, fontSize: line.fontSize, lineHeight: `${line.lineHeight}px` }}
-            >{line.text}{" "}</AddressTextLine>
-          ))}
+          {layout.lines.map((line, index) => {
+            const style = { left: line.left, top: line.top, fontSize: line.fontSize, lineHeight: `${line.lineHeight}px` };
+            const first = layout.lines.findIndex((other) => other.kind === line.kind) === index;
+            const value = line.kind === "to" ? postcard.recipient : postcard.from;
+            if (editable && editing === line.kind) {
+              // While retyping, the whole line sits where its first line was printed.
+              return first ? (
+                <AddressTextLine key={index} style={style}>
+                  {line.kind}{" "}
+                  <InlineField
+                    display={value || ""}
+                    label={line.kind === "to" ? "To" : "From"}
+                    autoFocus
+                    onCommit={(text) => onEdit(line.kind, text)}
+                    onDone={() => setEditing(null)}
+                  />
+                </AddressTextLine>
+              ) : null;
+            }
+            return (
+              <AddressTextLine
+                key={index}
+                aria-hidden={editable && first ? undefined : "true"}
+                style={{ ...style, ...(editable && { cursor: "text" }) }}
+                {...(editable && {
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    setEditing(line.kind);
+                  },
+                  ...(first && {
+                    role: "button",
+                    tabIndex: 0,
+                    "aria-label": `${line.kind} ${value || "nobody yet"}. Edit`,
+                    onFocus: () => setEditing(line.kind),
+                  }),
+                })}
+              >{line.text}{" "}</AddressTextLine>
+            );
+          })}
         </AddressInk>
       ) : (
         <AddressInk style={{ paddingTop: fallbackTop }}>
@@ -163,6 +228,46 @@ const Postage = styled.div`
   cursor: pointer;
 `;
 
+// A newly chosen stamp is pressed down onto the paper.
+const stampSettle = keyframes`
+  from {
+    opacity: 0;
+    scale: 1.06;
+  }
+`;
+
+const stampFadeIn = keyframes`
+  from {
+    opacity: 0;
+  }
+`;
+
+// Sending cancels the stamp: the postmark comes down onto it and settles.
+const postmarkStrike = keyframes`
+  from {
+    opacity: 0;
+    transform: rotate(-4deg) scale(1.15);
+  }
+`;
+
+const Postmark = styled.img`
+  position: absolute;
+  z-index: 3;
+  max-width: none;
+  margin: 0;
+  object-fit: contain;
+  pointer-events: none;
+  opacity: 0.8;
+  mix-blend-mode: multiply;
+  filter: sepia(0.25) saturate(0.7);
+  transform: rotate(-12deg);
+  animation: ${postmarkStrike} 260ms cubic-bezier(0.23, 1, 0.32, 1) 120ms backwards;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation-name: ${stampFadeIn};
+  }
+`;
+
 const PostageStamp = styled.img`
   position: absolute;
   z-index: 2;
@@ -174,6 +279,22 @@ const PostageStamp = styled.img`
   opacity: 0.85;
   mix-blend-mode: multiply;
   filter: sepia(0.18) saturate(0.82) contrast(0.9);
+
+  /* The stamp keeps its tilt in transform, so press and settle use scale. */
+  ${(props) =>
+    props.$pressable &&
+    css`
+      transition: scale 160ms cubic-bezier(0.23, 1, 0.32, 1);
+      animation: ${stampSettle} 180ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+
+      &:active {
+        scale: 0.95;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        animation-name: ${stampFadeIn};
+      }
+    `}
 `;
 
 const AddressInk = styled.div`
