@@ -1,43 +1,22 @@
 // The letters site on Render: each recipient's stack at /<slug>, the composer
-// at a secret /write/<path>, and the API behind both. Letters are files on
-// Render's persistent disk (DATA_ROOT); locally they're the repo's own files.
-import { createHash, timingSafeEqual } from "node:crypto";
+// at /write, and the API behind both. Letters are files on
+// Render's persistent disk (DATA_ROOT); locally, in .data/, which works the same way.
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import express from "express";
-import { writeArchive } from "./archive.js";
+import { writeArchive, writeRecipientArchive } from "./archive.js";
 import { LetterError, isRecipientSlug, letterFiles, readLetterRequest } from "./letters.js";
+import { CODE_ROOT, dataRoot } from "./paths.js";
 import { copyMissing, diskStorage } from "./storage.js";
 
-const CODE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// Render's generated secrets are base64, which doesn't belong in a URL, so
-// anything that isn't already URL-safe is hashed into the composer's path.
-export function composerPath(secret) {
-  if (!secret) return "";
-  return /^[A-Za-z0-9_-]{16,}$/.test(secret)
-    ? secret
-    : createHash("sha256").update(secret).digest("hex").slice(0, 32);
-}
-
-function sameSecret(given, expected) {
-  const a = Buffer.from(String(given || ""));
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-// root: where letters and photos live (the repo checkout on Render).
-// writeKey: the composer's path segment; "" disables the key check (local dev only).
-export function createApp({ root = CODE_ROOT, dist = path.join(CODE_ROOT, "dist"), writeKey, storage }) {
+// root: where letters and photos live (the disk on Render, .data/ locally).
+export function createApp({ root = CODE_ROOT, dist = path.join(CODE_ROOT, "dist"), storage }) {
   const app = express();
   const lettersDir = path.join(root, "src/letters");
   const stampNames = () => readdir(path.join(CODE_ROOT, "src/stamps")).catch(() => []);
 
-  const requireKey = (req, res, next) => {
-    if (writeKey === "" || (writeKey && sameSecret(req.get("x-write-key"), writeKey))) return next();
-    res.status(403).json({ error: "This page can't send letters." });
-  };
 
   app.get("/healthz", (req, res) => res.send("ok"));
 
@@ -55,13 +34,33 @@ export function createApp({ root = CODE_ROOT, dist = path.join(CODE_ROOT, "dist"
     res.json({ letters });
   });
 
-  app.get("/api/recipients", requireKey, async (req, res) => {
+  // Someone's own letters to keep: markdown, photos and a PDF, as one zip.
+  // Like the page itself, the slug is the key.
+  app.get("/api/letters/:recipient/download", async (req, res, next) => {
+    const { recipient } = req.params;
+    const folder = path.join(lettersDir, recipient);
+    const hasLetters = isRecipientSlug(recipient) && (await readdir(folder).catch(() => [])).some((name) => name.endsWith(".md"));
+    if (!hasLetters) return res.status(404).json({ error: "No letters here." });
+    res.set({
+      "Content-Type": "application/zip",
+      "Content-Disposition": `attachment; filename="letters-for-${recipient}.zip"`,
+      "Cache-Control": "no-store",
+    });
+    try {
+      await writeRecipientArchive(root, recipient, res);
+    } catch (error) {
+      if (res.headersSent) res.destroy(error);
+      else next(error);
+    }
+  });
+
+  app.get("/api/recipients", async (req, res) => {
     const entries = await readdir(lettersDir, { withFileTypes: true }).catch(() => []);
     const recipients = entries.filter((entry) => entry.isDirectory() && isRecipientSlug(entry.name)).map((entry) => entry.name);
     res.json({ recipients: recipients.sort() });
   });
 
-  app.post("/api/letters", requireKey, express.json({ limit: "80mb" }), async (req, res, next) => {
+  app.post("/api/letters", express.json({ limit: "80mb" }), async (req, res, next) => {
     try {
       const letter = readLetterRequest(req.body, await stampNames());
       let slug = letter.fields.date;
@@ -78,7 +77,7 @@ export function createApp({ root = CODE_ROOT, dist = path.join(CODE_ROOT, "dist"
   });
 
   // Everything, for safekeeping: a zip of every letter, photo and letters.json.
-  app.get("/api/archive", requireKey, async (req, res, next) => {
+  app.get("/api/archive", async (req, res, next) => {
     const day = new Date().toISOString().slice(0, 10);
     res.set({
       "Content-Type": "application/zip",
@@ -97,14 +96,9 @@ export function createApp({ root = CODE_ROOT, dist = path.join(CODE_ROOT, "dist"
 
   app.use("/images", express.static(path.join(root, "public/images"), { fallthrough: false, maxAge: "1y", immutable: true }));
 
-  // The composer only exists at its secret path; /write itself looks like any other blank page.
-  app.get("/write/:key", (req, res, next) => {
-    if (writeKey && sameSecret(req.params.key, writeKey)) {
-      return res.set("Cache-Control", "no-store").sendFile(path.join(dist, "write/index.html"));
-    }
-    next();
+  app.get(["/write", "/write/"], (req, res) => {
+    res.set("Cache-Control", "no-store").sendFile(path.join(dist, "write/index.html"));
   });
-  app.use("/write", (req, res) => res.status(404).sendFile(path.join(dist, "index.html")));
 
   app.use(express.static(dist, { index: false, maxAge: "1h" }));
 
@@ -115,6 +109,7 @@ export function createApp({ root = CODE_ROOT, dist = path.join(CODE_ROOT, "dist"
   app.use((error, req, res, next) => {
     if (error instanceof LetterError) return res.status(error.status).json({ error: error.message });
     if (error?.type === "entity.too.large") return res.status(413).json({ error: "That letter is too large to send." });
+    if (error?.status === 404) return res.status(404).end();
     console.error(error);
     res.status(500).json({ error: "The letter couldn't be sent. It's still here; try again in a moment." });
   });
@@ -123,25 +118,23 @@ export function createApp({ root = CODE_ROOT, dist = path.join(CODE_ROOT, "dist"
 }
 
 async function start() {
-  const root = process.env.DATA_ROOT ? path.resolve(process.env.DATA_ROOT) : CODE_ROOT;
+  const root = dataRoot();
   const production = process.env.NODE_ENV === "production";
-  const writeKey = composerPath(process.env.WRITE_SECRET);
 
   // Bring over letters committed to the repo that the disk doesn't have yet.
   const copied = await copyMissing(CODE_ROOT, root);
   if (copied.length) console.log(`Copied ${copied.length} files from the repo into ${root}`);
 
-  if (production && !writeKey) console.warn("WRITE_SECRET isn't set, so sending letters is turned off.");
   if (production && root === CODE_ROOT) {
     console.warn("DATA_ROOT isn't set: letters sent now are lost on the next deploy. Point it at the persistent disk.");
   }
 
-  // Render sets PORT; locally the API sits beside Vite (see vite.config.js).
+  // Render sets PORT; locally the API sits beside Vite, which sets PUBLIC_URL.
   const port = Number(process.env.PORT) || 5174;
-  createApp({ root, writeKey: writeKey || (production ? undefined : ""), storage: diskStorage(root) }).listen(port, () => {
-    const base = process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`;
-    console.log(`Letters at ${base}/<recipient>`);
-    if (writeKey) console.log(`Write letters at ${base}/write/${writeKey}`);
+  createApp({ root, storage: diskStorage(root) }).listen(port, () => {
+    const base = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || `http://localhost:${port}`;
+    console.log(`Letters at ${base}/<recipient>, e.g. ${base}/saiyam`);
+    console.log(`Write letters at ${base}/write`);
   });
 }
 

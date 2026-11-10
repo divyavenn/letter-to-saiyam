@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { E2E_ROOT, WRITE_KEY } from "./env.js";
+import { E2E_ROOT } from "./env.js";
 
 const DATE = "2026-11-05";
 const mod = process.platform === "darwin" ? "Meta" : "Control";
@@ -41,7 +41,7 @@ async function mailbox(page, { taken = false } = {}) {
 }
 
 async function openComposer(page) {
-  await page.goto(`/write/${WRITE_KEY}/`);
+  await page.goto("/write");
   const editor = page.getByRole("textbox", { name: "Letter" });
   await expect(editor).toBeVisible();
   await retype(page, page.getByLabel("Date", { exact: true }), "11/5/2026");

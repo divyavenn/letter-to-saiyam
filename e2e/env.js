@@ -4,4 +4,3 @@ import path from "node:path";
 
 export const PORT = 5181;
 export const E2E_ROOT = path.join(tmpdir(), "letters-e2e");
-export const WRITE_KEY = "e2e-composer-path-0001";

@@ -10,6 +10,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import styled, { createGlobalStyle, css } from "styled-components";
 import PostageAddress from "./PostageAddress.jsx";
+import { DownloadIcon } from "./icons.jsx";
 import { isRecipientSlug } from "./recipients.js";
 import {
   POSTCARD_IMPRINT,
@@ -732,6 +733,15 @@ function App({ letters }) {
       <>
         <GlobalStyle />
         <BackgroundMusic videoId={BG_MUSIC_VIDEO_ID} />
+        {/* Their letters to keep: markdown, photos and a PDF, in one zip. */}
+        <DownloadLink
+          href={`/api/letters/${encodeURIComponent(RECIPIENT)}/download`}
+          download
+          onClick={(event) => event.stopPropagation()}
+        >
+          <DownloadIcon />
+          <span>download letters</span>
+        </DownloadLink>
         <Desktop
           onClick={handleBackgroundClick}
           style={{ "--postcard-side-padding": `${postcardMetrics.sidePadding}px` }}
@@ -805,8 +815,11 @@ function Postcard({
   const prefersReducedMotion = useReducedMotion();
 
   const handlePointerMove = (event) => {
+    // An open letter holds still: it's being read, and text can't be
+    // selected while the card turns under the pointer.
     if (
       !isRaised ||
+      isOpen ||
       postcardMetrics.isMobile ||
       prefersReducedMotion ||
       event.pointerType === "touch"
@@ -824,6 +837,10 @@ function Postcard({
     tiltX.set(0);
     tiltY.set(0);
   };
+
+  useEffect(() => {
+    if (isOpen) resetTilt();
+  }, [isOpen]);
 
   const ease = [0.22, 1, 0.36, 1];
   const moveTransition = prefersReducedMotion
@@ -1012,6 +1029,54 @@ const MusicFrame = styled.div`
   height: 1px;
   opacity: 0;
   pointer-events: none;
+`;
+
+const DownloadLink = styled.a`
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 6px;
+  color: #ffffff;
+  font-family: "DIY", "Courier New", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  opacity: 0.9;
+  transition:
+    opacity 0.18s ease,
+    transform 0.15s ease;
+
+  @media (hover: hover) {
+    &:hover {
+      opacity: 1;
+    }
+  }
+
+  &:active {
+    transform: scale(0.96);
+  }
+
+  &:focus-visible {
+    outline: 2px solid #ffffff;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Just the icon on narrow phones, where the label would crowd the stack. */
+  @media (max-width: 360px) {
+    span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+  }
 `;
 
 const MuteButton = styled.button`

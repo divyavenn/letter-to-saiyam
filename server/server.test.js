@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { composerPath, createApp } from "./index.js";
+import { createApp } from "./index.js";
 import { isRecipientSlug, letterFiles, readLetterRequest, recipientSlug } from "./letters.js";
 import { copyMissing, diskStorage } from "./storage.js";
 
@@ -58,12 +58,6 @@ test("bad requests are refused with a reason", () => {
   );
 });
 
-test("composer paths are URL-safe", () => {
-  assert.equal(composerPath("my-long-secret-path-123"), "my-long-secret-path-123");
-  assert.match(composerPath("B0jrphAPOY7pg92AN0c9MN4yecczLMdwnx4OkA1KFUk="), /^[0-9a-f]{32}$/);
-  assert.equal(composerPath(""), "");
-});
-
 async function serve() {
   const root = await mkdtemp(path.join(tmpdir(), "letters-"));
   const dist = path.join(root, "dist");
@@ -72,7 +66,7 @@ async function serve() {
   await writeFile(path.join(dist, "write/index.html"), "composer");
   await mkdir(path.join(root, "src/letters/saiyam"), { recursive: true });
   await writeFile(path.join(root, "src/letters/saiyam/2026-11-05.md"), "---\ndate: 2026-11-05\n---\n\nHello");
-  const app = createApp({ root, dist, writeKey: "secret-path-for-tests", storage: diskStorage(root) });
+  const app = createApp({ root, dist, storage: diskStorage(root) });
   const server = await new Promise((resolve) => { const s = app.listen(0, () => resolve(s)); });
   const base = `http://localhost:${server.address().port}`;
   return { root, base, close: () => server.close() };
@@ -90,35 +84,26 @@ test("each page only gets its own letters, and slugs can't be probed", async (t)
   assert.equal(await fetch(`${site.base}/`).then((r) => r.text()), "stack");
 });
 
-test("the composer and its API need the secret path", async (t) => {
+test("the composer is at /write, with or without the slash", async (t) => {
   const site = await serve();
   t.after(site.close);
-  assert.equal(await fetch(`${site.base}/write/secret-path-for-tests/`).then((r) => r.text()), "composer");
-  for (const url of ["/write", "/write/", "/write/index.html", "/write/guess"]) {
-    const response = await fetch(site.base + url);
-    assert.equal(response.status, 404, url);
-    assert.equal(await response.text(), "stack", url);
-  }
-  assert.equal((await fetch(`${site.base}/api/recipients`)).status, 403);
-  const listed = await fetch(`${site.base}/api/recipients`, { headers: { "x-write-key": "secret-path-for-tests" } });
-  assert.deepEqual(await listed.json(), { recipients: ["saiyam"] });
+  for (const url of ["/write", "/write/"]) assert.equal(await fetch(site.base + url).then((r) => r.text()), "composer", url);
+  assert.deepEqual(await fetch(`${site.base}/api/recipients`).then((r) => r.json()), { recipients: ["saiyam"] });
 });
 
 test("sending writes the letter, taking the next name when the date is used", async (t) => {
   const site = await serve();
   t.after(site.close);
-  const send = (key, recipient) =>
+  const send = (recipient) =>
     fetch(`${site.base}/api/letters`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-write-key": key },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ recipient, fields: FIELDS, images: { a: image }, document: letterBody(p(text("Dear you,")), photo("a")) }),
     });
-  assert.equal((await send("wrong", "saiyam")).status, 403);
-
-  const first = await send("secret-path-for-tests", "Saiyam");
+  const first = await send("Saiyam");
   assert.equal(first.status, 201);
   assert.deepEqual(await first.json(), { recipient: "saiyam", slug: "2026-11-05-2", url: "/saiyam" });
-  const second = await send("secret-path-for-tests", "Ranju");
+  const second = await send("Ranju");
   assert.deepEqual(await second.json(), { recipient: "ranju", slug: "2026-11-05", url: "/ranju" });
 
   assert.deepEqual((await readdir(path.join(site.root, "src/letters/saiyam"))).sort(), ["2026-11-05-2.md", "2026-11-05.md"]);
@@ -126,6 +111,7 @@ test("sending writes the letter, taking the next name when the date is used", as
   const [, photoPath] = markdown.match(/!\[\]\((\/images\/[^)]+)\)/);
   const served = await fetch(site.base + photoPath);
   assert.equal(served.status, 200);
+  assert.equal((await fetch(`${site.base}/images/not-a-photo.jpg`)).status, 404);
   assert.deepEqual(Buffer.from(await served.arrayBuffer()), PNG);
   assert.equal((await fetch(`${site.base}/api/letters/ranju`).then((r) => r.json())).letters.length, 1);
 });
@@ -159,8 +145,7 @@ test("download all letters: a zip of letters, photos and their details", async (
     "---\ndate: 2026-11-05\nto: Saiyam\nfrom: Divya\nlocation: the Presidio\nimage: seed.png\nstamp: japan-mark.svg\n---\n\nDear Saiyam,\n\n![](/images/seed.png)\n",
   );
 
-  assert.equal((await fetch(`${site.base}/api/archive`)).status, 403);
-  const response = await fetch(`${site.base}/api/archive`, { headers: { "x-write-key": "secret-path-for-tests" } });
+  const response = await fetch(`${site.base}/api/archive`);
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-disposition"), /attachment; filename="letters-\d{4}-\d{2}-\d{2}\.zip"/);
   const zipPath = path.join(site.root, "out.zip");
@@ -184,4 +169,35 @@ test("download all letters: a zip of letters, photos and their details", async (
     },
   ]);
   assert.deepEqual(execFileSync("unzip", ["-p", zipPath, "images/seed.png"]), PNG);
+});
+
+test("each person can download their own letters as markdown, photos and a PDF", async (t) => {
+  const site = await serve();
+  t.after(site.close);
+  await mkdir(path.join(site.root, "public/images"), { recursive: true });
+  await writeFile(path.join(site.root, "public/images/seed.png"), PNG);
+  await writeFile(path.join(site.root, "public/images/someone-elses.png"), PNG);
+  await writeFile(
+    path.join(site.root, "src/letters/saiyam/2026-11-05.md"),
+    "---\ndate: 2026-11-05\nto: Saiyam\nfrom: Divya\nimage: seed.png\n---\n\nDear Saiyam, **bold** and [a link](https://example.com).\n\n![](/images/seed.png)\n",
+  );
+
+  assert.equal((await fetch(`${site.base}/api/letters/nobody/download`)).status, 404);
+  const response = await fetch(`${site.base}/api/letters/saiyam/download`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-disposition"), /filename="letters-for-saiyam\.zip"/);
+  const zipPath = path.join(site.root, "theirs.zip");
+  await writeFile(zipPath, Buffer.from(await response.arrayBuffer()));
+
+  const listing = execFileSync("unzip", ["-Z1", zipPath], { encoding: "utf8" }).trim().split("\n").sort();
+  assert.deepEqual(listing, [
+    "letters-for-saiyam/images/seed.png",
+    "letters-for-saiyam/letters.pdf",
+    "letters-for-saiyam/letters/2026-11-05.md",
+  ]);
+  const markdown = execFileSync("unzip", ["-p", zipPath, "letters-for-saiyam/letters/2026-11-05.md"], { encoding: "utf8" });
+  assert.match(markdown, /!\[\]\(\.\.\/images\/seed\.png\)/, "photo links work inside the zip");
+  const pdf = execFileSync("unzip", ["-p", zipPath, "letters-for-saiyam/letters.pdf"]);
+  assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
+  assert.ok(pdf.includes("https://example.com"), "the letter's link is clickable in the PDF");
 });

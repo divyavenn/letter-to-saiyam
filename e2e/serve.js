@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createApp } from "../server/index.js";
 import { diskStorage } from "../server/storage.js";
-import { E2E_ROOT, PORT, WRITE_KEY } from "./env.js";
+import { E2E_ROOT, PORT } from "./env.js";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -19,6 +19,6 @@ await writeFile(
   "---\ndate: 2026-11-05\nto: Saiyam\nfrom: Divya\nimage: seed.png\n---\n\nDear Saiyam,\n\nA seeded letter.\n",
 );
 
-createApp({ root: E2E_ROOT, writeKey: WRITE_KEY, storage: diskStorage(E2E_ROOT) }).listen(PORT, () => {
+createApp({ root: E2E_ROOT, storage: diskStorage(E2E_ROOT) }).listen(PORT, () => {
   console.log(`e2e server on ${PORT}`);
 });

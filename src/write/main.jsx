@@ -5,6 +5,7 @@ import { BubbleMenu } from "@tiptap/react/menus";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import styled, { createGlobalStyle, css, keyframes } from "styled-components";
+import { DownloadIcon, PaperPlaneIcon } from "../icons.jsx";
 import InlineField from "../InlineField.jsx";
 import PostageAddress from "../PostageAddress.jsx";
 import {
@@ -28,9 +29,6 @@ import { isRecipientSlug, recipientSlug } from "../recipients.js";
 import { clipboardUrl, defaultDocument, letterExtensions, linkUrl, plainTextContent } from "./markdown.js";
 import { blobToBase64, clearDraft, loadDraft, prepareImage, saveDraft } from "./storage.js";
 
-// The composer lives at /write/<key>; the key in its own address is what
-// lets it send. (Under the dev server it's just /write/, and no key is needed.)
-const WRITE_KEY = decodeURIComponent(window.location.pathname.match(/^\/write\/([^/]+)/)?.[1] || "");
 const RECIPIENT_KEY = "letter-composer:recipient";
 const DEFAULT_LOCATION = "somewhere on a lonely blue planet";
 const SAVE_DELAY = 500;
@@ -479,7 +477,7 @@ function Composer({ draft, onStartOver }) {
 
   // Everyone who already has a page, for the "for" field's suggestions.
   useEffect(() => {
-    fetch("/api/recipients", { headers: { "x-write-key": WRITE_KEY } })
+    fetch("/api/recipients")
       .then((response) => (response.ok ? response.json() : { recipients: [] }))
       .then((data) => setRecipients(data.recipients || []))
       .catch(() => {});
@@ -510,7 +508,7 @@ function Composer({ draft, onStartOver }) {
   const downloadAll = async () => {
     setDownloading(true);
     try {
-      const response = await fetch("/api/archive", { headers: { "x-write-key": WRITE_KEY } });
+      const response = await fetch("/api/archive");
       if (!response.ok) throw new Error("The letters couldn't be downloaded. Try again in a moment.");
       const name = response.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] || "letters.zip";
       const url = URL.createObjectURL(await response.blob());
@@ -552,7 +550,7 @@ function Composer({ draft, onStartOver }) {
       );
       const response = await fetch("/api/letters", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-write-key": WRITE_KEY },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           recipient: slug,
           fields,
@@ -747,7 +745,7 @@ function Composer({ draft, onStartOver }) {
             </StatusText>
             <FooterActions>
               <TextButton as="a" href={sentTo.url}>see their stack</TextButton>
-              <SendButton type="button" onClick={onStartOver}>write another</SendButton>
+              <PillButton type="button" onClick={onStartOver}>write another</PillButton>
             </FooterActions>
           </>
         ) : (
@@ -773,8 +771,15 @@ function Composer({ draft, onStartOver }) {
                 ))}
               </datalist>
             </RecipientField>
-            <SendButton type="button" onClick={send} disabled={sending}>
-              {sending ? "sending…" : "send"}
+            <SendButton
+              type="button"
+              onClick={send}
+              disabled={sending}
+              aria-label={sending ? "Sending" : "Send"}
+              title="Send"
+              $sending={sending}
+            >
+              <PaperPlaneIcon size={22} />
             </SendButton>
           </SendRow>
         )}
@@ -786,10 +791,18 @@ function Composer({ draft, onStartOver }) {
             {status.message}
           </StatusText>
         )}
-        <TextButton type="button" onClick={downloadAll} disabled={downloading}>
-          {downloading ? "gathering your letters…" : "download all letters"}
-        </TextButton>
       </Footer>
+
+      <CornerButton
+        type="button"
+        onClick={downloadAll}
+        disabled={downloading}
+        aria-label={downloading ? "Gathering your letters" : "Download all letters"}
+        title="Download all letters"
+        aria-busy={downloading}
+      >
+        <DownloadIcon size={18} />
+      </CornerButton>
     </>
   );
 }
@@ -1064,7 +1077,66 @@ const FooterActions = styled.div`
   gap: 20px;
 `;
 
+const pressable = css`
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+
+  &:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+
+  &:focus-visible {
+    outline: 2px solid #f6efe1;
+    outline-offset: 2px;
+  }
+`;
+
+// While a letter is on its way, the plane drifts up and to the right.
+const planeAway = keyframes`
+  to {
+    transform: translate(3px, -3px);
+  }
+`;
+
 const SendButton = styled.button`
+  ${pressable}
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: ${rust};
+  color: #f6efe1;
+  box-shadow: 0 6px 14px rgba(40, 24, 16, 0.3);
+
+  svg {
+    /* Optically centred: the plane's weight sits low and to the left. */
+    translate: 1px -1px;
+  }
+
+  ${({ $sending }) =>
+    $sending &&
+    css`
+      svg {
+        animation: ${planeAway} 0.6s ease-in-out infinite alternate;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        svg {
+          animation: none;
+        }
+      }
+    `}
+
+  &:disabled {
+    cursor: progress;
+  }
+`;
+
+const PillButton = styled.button`
+  ${pressable}
   min-width: 140px;
   height: 46px;
   padding: 0 24px;
@@ -1076,22 +1148,41 @@ const SendButton = styled.button`
   font-size: 0.95rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  cursor: pointer;
   box-shadow: 0 6px 14px rgba(40, 24, 16, 0.3);
-  transition: transform 0.15s ease, opacity 0.15s ease;
+`;
 
-  &:active:not(:disabled) {
-    transform: scale(0.97);
+const gathering = keyframes`
+  to {
+    opacity: 0.4;
   }
+`;
 
-  &:focus-visible {
-    outline: 2px solid #f6efe1;
-    outline-offset: 2px;
+const CornerButton = styled.button`
+  ${pressable}
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: #ffffff;
+  opacity: 0.9;
+
+  @media (hover: hover) {
+    &:hover {
+      opacity: 1;
+    }
   }
 
   &:disabled {
-    opacity: 0.6;
-    cursor: default;
+    cursor: progress;
+    animation: ${gathering} 0.7s ease-in-out infinite alternate;
   }
 `;
 
@@ -1130,11 +1221,17 @@ const RecipientField = styled.label`
   font-size: 0.85rem;
 
   input {
-    width: 10ch;
-    min-width: 0;
+    /* Fits the name, so the plane sits right beside it. */
+    field-sizing: content;
+    min-width: 6ch;
+    max-width: 14ch;
+
+    @supports not (field-sizing: content) {
+      width: 10ch;
+    }
+
     padding: 2px 0 4px;
     border: none;
-    border-bottom: 1px solid rgba(246, 239, 225, 0.5);
     border-radius: 0;
     background: transparent;
     color: #fbf8f1;
@@ -1142,14 +1239,14 @@ const RecipientField = styled.label`
     /* 16px keeps iOS from zooming in on focus. */
     font-size: max(16px, 1.25rem);
     outline: none;
-    transition: border-color 0.15s ease;
 
     &::placeholder {
       color: rgba(246, 239, 225, 0.45);
     }
 
-    &:focus-visible {
-      border-bottom-color: #fbf8f1;
+    /* Chrome's suggestions arrow; suggestions still appear as you type. */
+    &::-webkit-calendar-picker-indicator {
+      display: none !important;
     }
   }
 `;

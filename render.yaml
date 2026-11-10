@@ -1,5 +1,5 @@
 # One-click deploy: https://render.com/deploy?repo=https://github.com/divyavenn/letter-to-saiyam
-# Nothing to fill in: the composer's secret is generated for you.
+# Nothing to fill in. Letters are read at /<recipient> and written at /write.
 services:
   - type: web
     name: letters
@@ -23,7 +23,3 @@ services:
         value: production
       - key: DATA_ROOT
         value: /var/data
-      # The composer's secret address, /write/<path>, is derived from this and
-      # printed in the deploy logs.
-      - key: WRITE_SECRET
-        generateValue: true

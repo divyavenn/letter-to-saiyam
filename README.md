@@ -10,17 +10,17 @@ The button sets up everything in `render.yaml`; there's nothing to fill in. Lett
 
 A disk needs a paid instance: Render's smallest one (shown with its price when you deploy) plus $0.25 a month for the disk. In return the site doesn't sleep when idle. Deploys restart the server, so the site is down for a few seconds during each one.
 
-Once it's up, the deploy logs print the composer's address:
+Once it's up, write letters at `/write` and read them at `/<recipient>`, e.g. `/saiyam`.
 
-```
-Write letters at https://letters-xxxx.onrender.com/write/3f9a…
-```
-
-That address is the key: anyone with it can send letters, so keep it to yourself. To change it, set a new `WRITE_SECRET` in Render.
+Anyone who finds `/write` can send letters, and use "download all letters" to read everyone's, so keep that address to yourself.
 
 ## Backing up
 
 Below Send in the composer there's **download all letters**: a zip of every recipient's letters (markdown with their frontmatter), all the photos, and `letters.json`, which lists each letter's recipient, date, to, from, location, stamp, cover and photos. The disk is the only copy of letters sent from the composer, so download one now and then.
+
+## Reading
+
+Each person's page has **download letters** in the corner: a zip of their letters as markdown, their photos, and `letters.pdf`, a printable copy laid out like the postcards.
 
 ## Writing
 
@@ -56,6 +56,8 @@ npm install
 npm run dev
 ```
 
-That starts the site at http://localhost:5173 and the composer at http://localhost:5173/write/. Letters you send locally are written straight into the repo's `src/letters` and `public/images`.
+Locally it works the same way as on Render. Letters live in `.data/` (git-ignored), which stands in for the disk: the repo's letters are copied in on startup, and anything you send goes there. Read them at http://localhost:5173/saiyam and write at http://localhost:5173/write.
+
+Delete `.data/` to start over from the repo's letters.
 
 `npm test` runs the unit and server tests; `npm run test:e2e` runs the browser tests.
