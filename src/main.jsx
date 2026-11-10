@@ -737,10 +737,11 @@ function App({ letters }) {
         <DownloadLink
           href={`/api/letters/${encodeURIComponent(RECIPIENT)}/download`}
           download
+          aria-label="Download letters"
+          title="Download letters"
           onClick={(event) => event.stopPropagation()}
         >
-          <DownloadIcon />
-          <span>download letters</span>
+          <DownloadIcon size={18} />
         </DownloadLink>
         <Desktop
           onClick={handleBackgroundClick}
@@ -1036,16 +1037,11 @@ const DownloadLink = styled.a`
   top: max(14px, env(safe-area-inset-top));
   left: max(14px, env(safe-area-inset-left));
   z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 44px;
-  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
   color: #ffffff;
-  font-family: "DIY", "Courier New", monospace;
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  text-decoration: none;
   opacity: 0.9;
   transition:
     opacity 0.18s ease,
@@ -1064,21 +1060,9 @@ const DownloadLink = styled.a`
   &:focus-visible {
     outline: 2px solid #ffffff;
     outline-offset: 2px;
-    border-radius: 4px;
-  }
-
-  /* Just the icon on narrow phones, where the label would crowd the stack. */
-  @media (max-width: 360px) {
-    span {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip-path: inset(50%);
-    }
+    border-radius: 50%;
   }
 `;
-
 const MuteButton = styled.button`
   position: fixed;
   top: max(14px, env(safe-area-inset-top));

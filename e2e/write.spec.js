@@ -439,15 +439,25 @@ test("sending needs someone to send to, and a photo", async ({ page }) => {
   await expect(page.getByRole("status")).toContainText("Paste in a photo");
 });
 
-test("the recipient list suggests existing pages and names new ones", async ({ page }) => {
+test("names complete as you type, like tags in the logbook", async ({ page }) => {
   const github = await mailbox(page);
   const editor = await openComposer(page);
-  await expect(page.locator("#recipients option[value='saiyam']")).toBeAttached();
-  const who = page.getByLabel("Who it's for", { exact: true });
-  await who.fill("saiyam");
-  await expect(page.getByText(/a new page/)).toHaveCount(0);
-  await who.fill("Sidd Mehta");
-  await expect(page.getByText("a new page: /sidd-mehta")).toBeVisible();
+  const who = page.getByRole("combobox", { name: "Who it's for" });
+  await who.click();
+  await page.keyboard.type("sa");
+  // The best match finishes the word inline; Tab takes it.
+  await expect(who).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("option", { name: "saiyam" })).toBeAttached();
+  await page.keyboard.press("Tab");
+  await expect(who).toHaveValue("saiyam");
+  await expect(who).toHaveAttribute("aria-expanded", "false");
+
+  // Escape lets a suggestion go; a name nobody has yet is just typed out.
+  await who.fill("");
+  await page.keyboard.type("sa");
+  await page.keyboard.press("Escape");
+  await expect(who).toHaveAttribute("aria-expanded", "false");
+  await expect(who).toHaveValue("sa");
 
   // The letter's own "to" line is separate from who it's sent to.
   await writeBody(page, editor);
@@ -486,4 +496,48 @@ test("download all letters gives a zip of every letter, photo and their details"
   const mine = letters.find((letter) => letter.recipient === github.recipient);
   expect(mine).toMatchObject({ date: DATE, to: "Saiyam", from: "Divya" });
   expect(files).toContain(`images/${mine.cover}`);
+});
+
+test("changing the stamp moves the address straight to its new place", async ({ page }) => {
+  await mailbox(page);
+  await openComposer(page);
+  for (let tap = 0; tap < 3; tap++) {
+    const positions = await page.evaluate(async () => {
+      const where = () => {
+        const line = document.querySelector('[role="group"][aria-label^="to "] > span');
+        const box = line?.getBoundingClientRect();
+        return box ? `${Math.round(box.left)},${Math.round(box.top)}` : "none";
+      };
+      const seen = [where()];
+      document.querySelector('img[role="button"]').click();
+      const start = performance.now();
+      await new Promise((resolve) => {
+        const tick = () => {
+          if (where() !== seen.at(-1)) seen.push(where());
+          performance.now() - start < 600 ? requestAnimationFrame(tick) : resolve();
+        };
+        requestAnimationFrame(tick);
+      });
+      return seen;
+    });
+    // At most one move: from where it was to where it belongs, with no detour.
+    expect(positions.length, positions.join(" → ")).toBeLessThanOrEqual(2);
+    expect(positions).not.toContain("none");
+  }
+});
+
+test("the location's placeholder can be edited like any words", async ({ page }) => {
+  const github = await mailbox(page);
+  const editor = await openComposer(page);
+  const location = page.getByLabel("Written at", { exact: true });
+  await location.click();
+  await expect.poll(() => page.evaluate(() => getSelection().toString().toLowerCase())).toBe("somewhere on a lonely blue planet");
+  await page.keyboard.press("ArrowRight");
+  for (let i = 0; i < "lonely blue planet".length; i++) await page.keyboard.press("ArrowLeft");
+  await page.keyboard.type("sunny ");
+  await page.keyboard.press("Enter");
+  await writeBody(page, editor);
+  await pasteImage(editor);
+  await send(page);
+  expect(github.markdown()).toContain("location: somewhere on a sunny lonely blue planet");
 });

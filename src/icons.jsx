@@ -16,16 +16,15 @@ export function DownloadIcon({ size = 16 }) {
   );
 }
 
-export function PaperPlaneIcon({ size = 20 }) {
+// A folded paper plane in two reds: the near wing catches the light in rust,
+// the far wing and the fold underneath sit in shadow.
+export function PaperPlaneIcon({ size = 32 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M21 3 10.5 13.5M21 3l-6.5 18-4-7.5L3 9.5 21 3Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M29 3 3.5 13.2l8.6 3.6L29 3Z" fill="#b5532f" />
+      <path d="M29 3 12.1 16.8l5.2 11.9L29 3Z" fill="#7a1422" />
+      <path d="m12.1 16.8.9 7.6 4.3.3-5.2-7.9Z" fill="#561019" />
+      <path d="M29 3 12.1 16.8" stroke="#f3d9c6" strokeOpacity=".55" strokeWidth=".7" strokeLinecap="round" />
     </svg>
   );
 }

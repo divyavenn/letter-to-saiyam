@@ -56,6 +56,40 @@ export default function PostageAddress({ postcard, isMobile, className, onClick,
   const [prepared, setPrepared] = useState(null);
   const [editing, setEditing] = useState(null);
   const editable = Boolean(onEdit);
+  // The stamps actually drawn. A newly chosen stamp is loaded first and only
+  // then swapped in, together with the address laid out around it; otherwise
+  // the address falls back to a plain layout for a frame and jumps.
+  const [stamps, setStamps] = useState(postcard.stamps);
+  const wanted = postcard.stamps.map((stamp) => stamp.src).join("|");
+
+  useEffect(() => {
+    const missing = postcard.stamps.filter((stamp) => !assets[stamp.src]);
+    if (!missing.length) {
+      setStamps(postcard.stamps);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      missing.map(
+        (stamp) =>
+          new Promise((resolve) => {
+            const image = new Image();
+            image.onload = () => resolve([stamp.src, readStamp(image)]);
+            image.onerror = () => resolve([stamp.src, { ratio: 1, contour: rectangleContour }]);
+            image.src = stamp.src;
+          }),
+      ),
+    ).then((loaded) => {
+      if (cancelled) return;
+      setAssets((current) => ({ ...current, ...Object.fromEntries(loaded) }));
+      setStamps(postcard.stamps);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Keyed on the stamps' sources so a new array with the same stamps is a no-op.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted]);
 
   useLayoutEffect(() => {
     let frame = 0;
@@ -105,7 +139,7 @@ export default function PostageAddress({ postcard, isMobile, className, onClick,
     return () => { cancelled = true; };
   }, [postcard.recipient, postcard.from, toSize, fromSize, isMobile, editable]);
 
-  const shapes = useMemo(() => postcard.stamps.map((stamp, index) => {
+  const shapes = useMemo(() => stamps.map((stamp, index) => {
     const asset = assets[stamp.src] || { ratio: 1, contour: rectangleContour };
     const width = Math.max(1, Math.min(metrics?.stampWidth || 64, (metrics?.width || 160) - 8));
     const height = Math.min(isMobile ? 84 : 132, width / asset.ratio);
@@ -119,9 +153,9 @@ export default function PostageAddress({ postcard, isMobile, className, onClick,
       top: 3,
       angle: index % 2 ? -3 : 2,
     };
-  }), [postcard.stamps, assets, metrics, isMobile]);
+  }), [stamps, assets, metrics, isMobile]);
 
-  const ready = prepared && metrics?.width && postcard.stamps.every((stamp) => assets[stamp.src]);
+  const ready = prepared && metrics?.width && stamps.every((stamp) => assets[stamp.src]);
   const layout = useMemo(() => ready ? layoutAddress(prepared, metrics.width, shapes) : null, [ready, prepared, metrics, shapes]);
   const fallbackTop = Math.max(0, ...shapes.map((stamp) => stamp.top + stamp.height + 4));
   const fullAddress = [postcard.recipient && `to ${postcard.recipient}`, postcard.from && `from ${postcard.from}`].filter(Boolean).join(". ");

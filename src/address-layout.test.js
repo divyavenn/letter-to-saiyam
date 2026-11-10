@@ -99,3 +99,10 @@ test("missing stamps or either address field still produce a complete address", 
   assert.deepEqual(layoutAddress([], 160, []), { lines: [], height: 0 });
   assert.ok(layoutAddress([], 160, [stamp(160)]).height > 82);
 });
+
+test("short names stay on one line each beside a tall stamp", () => {
+  for (const width of [200, 230, 262]) {
+    const layout = assertLayout(paragraphs("Saiyam", "Divya", 16), width, [stamp(width)]);
+    assert.deepEqual(layout.lines.map((line) => line.text.trim()), ["to Saiyam", "from Divya"], `width ${width}`);
+  }
+});

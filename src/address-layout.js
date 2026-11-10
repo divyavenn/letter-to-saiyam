@@ -52,8 +52,17 @@ export function layoutAddress(paragraphs, width, stamps) {
 
   const naturalWidth = Math.max(...paragraphs.map((paragraph) => measureNaturalWidth(paragraph.prepared)));
   const firstWidth = Math.min(measureNaturalWidth(first.prepared), width * 0.7);
-  // Keep to/from left-aligned together, as far right as the first usable row permits.
-  const left = Math.max(0, Math.floor(Math.min(
+  // Keep to/from left-aligned together, as far right as lets each of them stay
+  // on one line beside the stamps, so "from Divya" isn't split in two. Only
+  // when a name is too long for that does it start where the first line fits.
+  let row = y;
+  let oneLineEach = width - naturalWidth;
+  for (const paragraph of paragraphs) {
+    const room = addressRowRight(width, stamps, row, paragraph.lineHeight);
+    oneLineEach = Math.min(oneLineEach, room - measureNaturalWidth(paragraph.prepared));
+    row += paragraph.lineHeight + 3;
+  }
+  const left = Math.max(0, Math.floor(oneLineEach >= 0 ? oneLineEach : Math.min(
     width - naturalWidth,
     addressRowRight(width, stamps, y, first.lineHeight) - firstWidth,
   )));

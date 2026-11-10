@@ -7,6 +7,7 @@ import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import styled, { createGlobalStyle, css, keyframes } from "styled-components";
 import { DownloadIcon, PaperPlaneIcon } from "../icons.jsx";
 import InlineField from "../InlineField.jsx";
+import RecipientPicker from "./RecipientPicker.jsx";
 import PostageAddress from "../PostageAddress.jsx";
 import {
   POSTCARD_IMPRINT,
@@ -578,7 +579,9 @@ function Composer({ draft, onStartOver }) {
 
   const sending = status.kind === "sending";
   const typedSlug = recipientSlug(recipient);
-  const newPage = isRecipientSlug(typedSlug) && !recipients.includes(typedSlug) ? typedSlug : null;
+  // Only once what's typed can't still become someone who has a page.
+  const newPage =
+    isRecipientSlug(typedSlug) && !recipients.some((name) => name.startsWith(typedSlug)) ? typedSlug : null;
   const sent = status.kind === "sent";
   const locked = sending || sent;
   const stamp = STAMP_LIBRARY.find((entry) => entry.name === fields.stamp) || STAMP_LIBRARY[0];
@@ -750,27 +753,14 @@ function Composer({ draft, onStartOver }) {
           </>
         ) : (
           <SendRow>
-            <RecipientField>
-              <span aria-hidden="true">for</span>
-              <input
-                aria-label="Who it's for"
-                list="recipients"
-                value={recipient}
-                placeholder="someone"
-                autoCapitalize="none"
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-                disabled={sending}
-                onChange={(event) => setRecipient(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && !event.nativeEvent.isComposing && send()}
-              />
-              <datalist id="recipients">
-                {recipients.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </RecipientField>
+            <RecipientPicker
+              value={recipient}
+              onChange={setRecipient}
+              names={recipients}
+              disabled={sending}
+              placeholder="who's it for?"
+              onSubmit={send}
+            />
             <SendButton
               type="button"
               onClick={send}
@@ -779,7 +769,7 @@ function Composer({ draft, onStartOver }) {
               title="Send"
               $sending={sending}
             >
-              <PaperPlaneIcon size={22} />
+              <PaperPlaneIcon size={34} />
             </SendButton>
           </SendRow>
         )}
@@ -793,7 +783,7 @@ function Composer({ draft, onStartOver }) {
         )}
       </Footer>
 
-      <CornerButton
+      <DownloadAllButton
         type="button"
         onClick={downloadAll}
         disabled={downloading}
@@ -802,7 +792,7 @@ function Composer({ draft, onStartOver }) {
         aria-busy={downloading}
       >
         <DownloadIcon size={18} />
-      </CornerButton>
+      </DownloadAllButton>
     </>
   );
 }
@@ -838,6 +828,7 @@ const GlobalStyle = createGlobalStyle`
 `;
 
 const Page = styled.main`
+  position: relative;
   min-height: 100vh;
   padding: clamp(28px, 8vh, 72px) clamp(28px, 8vw, 48px) 64px;
   background:
@@ -1032,7 +1023,7 @@ const Footer = styled.div`
   align-items: center;
   gap: 14px;
   max-width: 584px;
-  margin: 28px auto 0;
+  margin: 56px auto 0;
   text-align: center;
   font-family: "Oceanside Typewriter", "Courier New", monospace;
 `;
@@ -1098,22 +1089,38 @@ const planeAway = keyframes`
   }
 `;
 
+// Hovering, the plane lifts and drifts as if caught by air.
+const planeFloat = keyframes`
+  0%,
+  100% {
+    transform: translate(0, -3px) rotate(-2deg);
+  }
+  50% {
+    transform: translate(1px, -6px) rotate(1deg);
+  }
+`;
+
 const SendButton = styled.button`
   ${pressable}
   display: grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
+  width: 48px;
+  height: 48px;
   padding: 0;
   border: none;
-  border-radius: 50%;
-  background: ${rust};
-  color: #f6efe1;
-  box-shadow: 0 6px 14px rgba(40, 24, 16, 0.3);
+  background: none;
 
   svg {
-    /* Optically centred: the plane's weight sits low and to the left. */
-    translate: 1px -1px;
+    /* Its shadow on the paper below. */
+    filter: drop-shadow(0 4px 3px rgba(30, 14, 10, 0.32));
+    transition: transform 0.25s cubic-bezier(0.23, 1, 0.32, 1), filter 0.25s ease;
+  }
+
+  @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+    &:hover:not(:disabled) svg {
+      filter: drop-shadow(0 9px 5px rgba(30, 14, 10, 0.22));
+      animation: ${planeFloat} 1.8s ease-in-out infinite;
+    }
   }
 
   ${({ $sending }) =>
@@ -1133,9 +1140,7 @@ const SendButton = styled.button`
   &:disabled {
     cursor: progress;
   }
-`;
-
-const PillButton = styled.button`
+`;const PillButton = styled.button`
   ${pressable}
   min-width: 140px;
   height: 46px;
@@ -1157,11 +1162,12 @@ const gathering = keyframes`
   }
 `;
 
-const CornerButton = styled.button`
+// At the foot of the page, bottom left, out of the way of the letter.
+const DownloadAllButton = styled.button`
   ${pressable}
-  position: fixed;
-  top: max(14px, env(safe-area-inset-top));
-  right: max(14px, env(safe-area-inset-right));
+  position: absolute;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  left: max(14px, env(safe-area-inset-left));
   z-index: 50;
   display: grid;
   place-items: center;
@@ -1209,46 +1215,7 @@ const SendRow = styled.div`
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 14px 18px;
-`;
-
-const RecipientField = styled.label`
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  color: #f6efe1;
-  font-family: "Oceanside Typewriter", "Courier New", monospace;
-  font-size: 0.85rem;
-
-  input {
-    /* Fits the name, so the plane sits right beside it. */
-    field-sizing: content;
-    min-width: 6ch;
-    max-width: 14ch;
-
-    @supports not (field-sizing: content) {
-      width: 10ch;
-    }
-
-    padding: 2px 0 4px;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    color: #fbf8f1;
-    font-family: "Biro Script", "Segoe Print", cursive;
-    /* 16px keeps iOS from zooming in on focus. */
-    font-size: max(16px, 1.25rem);
-    outline: none;
-
-    &::placeholder {
-      color: rgba(246, 239, 225, 0.45);
-    }
-
-    /* Chrome's suggestions arrow; suggestions still appear as you type. */
-    &::-webkit-calendar-picker-indicator {
-      display: none !important;
-    }
-  }
+  gap: 10px 2px;
 `;
 
 const Hint = styled.p`

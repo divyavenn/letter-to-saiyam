@@ -32,10 +32,27 @@ export default function InlineField({
     window.getSelection().addRange(range);
   }, [autoFocus]);
 
+  // The placeholder is real text once you click in, all selected: type over
+  // it, or change just a word. Left as it was, it still counts as empty.
+  const begin = () => {
+    editing.current = true;
+    const element = ref.current;
+    if (!placeholder || element.textContent) return;
+    element.textContent = placeholder;
+    requestAnimationFrame(() => {
+      if (document.activeElement !== element) return;
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    });
+  };
+
   const finish = () => {
     const element = ref.current;
     editing.current = false;
-    const text = element.textContent.replace(/\s+/g, " ").trim();
+    const typed = element.textContent.replace(/\s+/g, " ").trim();
+    const text = typed === placeholder ? "" : typed;
     // Show the committed value; if the parent rejects it, this restores the old one.
     element.textContent = display;
     onCommit(text);
@@ -52,9 +69,7 @@ export default function InlineField({
       aria-label={label}
       data-placeholder={placeholder}
       spellCheck={false}
-      onFocus={() => {
-        editing.current = true;
-      }}
+      onFocus={begin}
       onBlur={finish}
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
@@ -79,6 +94,9 @@ export default function InlineField({
 }
 
 const Field = styled.span`
+  /* A box of its own, so even an empty field can be clicked into. */
+  display: inline-block;
+  min-width: 1ch;
   font: inherit;
   letter-spacing: inherit;
   color: inherit;
